@@ -84,24 +84,66 @@ struct ExercisesView: View {
         }
         .navigationTitle("Exercises")
         .toolbar {
+#if os(iOS)
             ToolbarItemGroup(placement: .topBarLeading) {
-                HStack(spacing: 6) {
-                    Text("Focus")
-                    Picker("Focus", selection: $selectedArea) {
-                        ForEach(areas, id: \.self) { Text($0).tag($0) }
+                Menu {
+                    ForEach(areas, id: \.self) { area in
+                        Button(action: { selectedArea = area }) {
+                            HStack {
+                                Text(area)
+                                if selectedArea == area { Image(systemName: "checkmark") }
+                            }
+                        }
                     }
-                    .pickerStyle(.menu)
+                } label: {
+                    Label("Focus", systemImage: "line.3.horizontal.decrease.circle")
                 }
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
-                HStack(spacing: 6) {
-                    Text("Difficulty")
-                    Picker("Difficulty", selection: $selectedDifficulty) {
-                        ForEach(difficulties, id: \.self) { Text($0).tag($0) }
+                Menu {
+                    ForEach(difficulties, id: \.self) { diff in
+                        Button(action: { selectedDifficulty = diff }) {
+                            HStack {
+                                Text(diff)
+                                if selectedDifficulty == diff { Image(systemName: "checkmark") }
+                            }
+                        }
                     }
-                    .pickerStyle(.menu)
+                } label: {
+                    Label("Difficulty", systemImage: "dial.low")
                 }
             }
+#else
+            // macOS: use automatic placement and space items apart
+            ToolbarItem(placement: .automatic) {
+                Menu {
+                    ForEach(areas, id: \.self) { area in
+                        Button(action: { selectedArea = area }) {
+                            HStack {
+                                Text(area)
+                                if selectedArea == area { Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Focus", systemImage: "line.3.horizontal.decrease.circle")
+                }
+            }
+            ToolbarItem(placement: .automatic) {
+                Menu {
+                    ForEach(difficulties, id: \.self) { diff in
+                        Button(action: { selectedDifficulty = diff }) {
+                            HStack {
+                                Text(diff)
+                                if selectedDifficulty == diff { Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Difficulty", systemImage: "dial.low")
+                }
+            }
+#endif
         }
     }
 
@@ -116,12 +158,19 @@ struct ExercisesView: View {
 }
 
 private struct ExerciseRow: View {
+    private struct IdentifiedPlayer: Identifiable {
+        let id = UUID()
+        let player: AVPlayer
+    }
+
     let entry: CatalogEntry
     @State private var avPlayer: AVPlayer? = nil
-    @State private var isPresentingPlayer = false
-    @StateObject private var videoManager = VideoManager.shared
+    @State private var presentedPlayerItem: IdentifiedPlayer? = nil
 
     var body: some View {
+        let videoManager = VideoManager.shared
+        let videoURL = videoManager.url(for: entry.exercise.name)
+
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.exercise.name)
@@ -131,9 +180,14 @@ private struct ExerciseRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if entry.exercise.videoPath != nil, VideoMode(rawValue: videoManager.videoMode) != nil {
+            if let url = videoURL {
                 Button {
-                    prepareAndPlay()
+                    guard presentedPlayerItem == nil else { return }
+                    if let player = makePlayer(for: url) {
+                        avPlayer = player
+                        let identified = IdentifiedPlayer(player: player)
+                        presentedPlayerItem = identified
+                    }
                 } label: {
                     Image(systemName: "play.circle.fill")
                         .font(.title2)
@@ -142,36 +196,41 @@ private struct ExerciseRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            if entry.exercise.videoPath != nil, VideoMode(rawValue: videoManager.videoMode) != nil {
-                prepareAndPlay()
+            guard presentedPlayerItem == nil else { return }
+            if let url = videoURL, let player = makePlayer(for: url) {
+                avPlayer = player
+                let identified = IdentifiedPlayer(player: player)
+                presentedPlayerItem = identified
             }
         }
-        .sheet(isPresented: $isPresentingPlayer) {
+        .sheet(item: $presentedPlayerItem, onDismiss: {
+            avPlayer?.pause()
+            avPlayer = nil
+        }) { identified in
 #if canImport(AVKit)
-            if let player = avPlayer {
-                VideoPlayer(player: player)
-                    .onDisappear { player.pause() }
-            } else {
-                Text("No video available")
-            }
+            VideoPlayer(player: identified.player)
+                .aspectRatio(16/9, contentMode: .fit)
+                .frame(minWidth: 640, minHeight: 360)
+                .onAppear { identified.player.play() }
+                .onDisappear {
+                    identified.player.pause()
+                }
+                #if os(macOS)
+                .presentationSizing(.fitted)
+                #endif
 #else
             Text("Video not supported on this platform")
 #endif
         }
     }
 
-    private func prepareAndPlay() {
-        guard let rel = entry.exercise.videoPath,
-              let url = videoManager.playableURL(forRelativePath: rel) else {
-            return
-        }
+    private func makePlayer(for url: URL) -> AVPlayer? {
 #if canImport(AVKit)
-        let player = AVPlayer(url: url)
-        avPlayer = player
-        isPresentingPlayer = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            player.play()
-        }
+        let item = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: item)
+        return player
+#else
+        return nil
 #endif
     }
 }

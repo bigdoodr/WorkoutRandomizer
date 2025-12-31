@@ -504,14 +504,16 @@ struct WorkoutGeneratorView: View {
     }
     
     private func startVideoDownload() {
-        // Gather all non-nil videoPaths
-        let allVideos = exercises.values.flatMap { $0.values.flatMap { $0 } }
-            .compactMap { $0.videoPath }
+        // Gather keys for all exercises that have known videos in VideoManager
+        let allKeys = exercises.values
+            .flatMap { $0.values.flatMap { $0 } }
+            .map { $0.name }
+            .filter { VideoManager.shared.path(for: $0) != nil }
             .unique()
-        
-        downloadProgress = (completed: 0, total: allVideos.count)
-        
-        videoManager.downloadAll(relativePaths: allVideos, progress: { completed, total in
+
+        downloadProgress = (completed: 0, total: allKeys.count)
+
+        videoManager.downloadAll(keys: allKeys, progress: { completed, total in
             downloadProgress = (completed: completed, total: total)
         }, completion: {
             downloadProgress = nil
@@ -635,7 +637,8 @@ struct WorkoutPlayerView: View {
     }
     
     var videoURL: URL? {
-        videoManager.playableURL(forRelativePath: currentExercise?.videoPath)
+        guard let name = currentExercise?.name else { return nil }
+        return videoManager.url(for: name)
     }
     
     var body: some View {
