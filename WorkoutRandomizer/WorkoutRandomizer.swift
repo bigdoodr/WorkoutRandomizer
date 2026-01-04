@@ -205,7 +205,7 @@ struct WorkoutGeneratorView: View {
                                         }
                                     }
                                 )) {
-                                    Label("Select All", systemImage: selectedFocusAreas.count == focusAreas.count ? "checkmark.square.fill" : "square")
+                                    Text("Select All")
                                 }
                                 .toggleStyle(.switch)
                             }
