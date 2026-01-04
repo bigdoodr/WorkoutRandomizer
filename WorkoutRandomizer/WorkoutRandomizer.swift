@@ -42,6 +42,7 @@ struct WorkoutGeneratorView: View {
     @State private var generatedRoutine: [Exercise] = []
     @State private var showingWorkout = false
     @State private var isGenerating = false
+    @State private var scrollToGeneratedToken = UUID()
     
     // Feedback settings
     @State private var enableSound_iOS_tv_vision = true
@@ -150,295 +151,310 @@ struct WorkoutGeneratorView: View {
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    
-                    // View Exercises
-                    VStack(alignment: .leading, spacing: 12) {
-                        Button {
-                            // Navigate to the Exercises view
-                        } label: {
-                            NavigationLink(destination: ExercisesView(exercisesByArea: exercises)) {
-                                HStack {
-                                    Image(systemName: "list.bullet.rectangle.portrait")
-                                    Text("View Exercises")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(.purple)
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                        }
-                    }
-                    
-                    // Focus Areas
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Focus Areas")
-                            .font(.title2)
-                            .fontWeight(.semibold)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
                         
-                        HStack {
-                            Toggle(isOn: Binding(
-                                get: { selectedFocusAreas.count == focusAreas.count },
-                                set: { newValue in
-                                    if newValue {
-                                        selectedFocusAreas = Set(focusAreas)
-                                    } else {
-                                        selectedFocusAreas.removeAll()
-                                    }
-                                }
-                            )) {
-                                Label("Select All", systemImage: selectedFocusAreas.count == focusAreas.count ? "checkmark.square.fill" : "square")
-                            }
-                            .toggleStyle(.switch)
-                        }
-                        
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                            ForEach(focusAreas, id: \.self) { area in
-                                HStack {
-                                    Image(systemName: selectedFocusAreas.contains(area) ? "checkmark.square.fill" : "square")
-                                        .foregroundStyle(selectedFocusAreas.contains(area) ? .blue : .secondary)
-                                    Text(area)
-                                        .font(.subheadline)
-                                    Spacer()
-                                }
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    if selectedFocusAreas.contains(area) {
-                                        selectedFocusAreas.remove(area)
-                                    } else {
-                                        selectedFocusAreas.insert(area)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Difficulty
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Difficulty")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                        
-                        HStack(spacing: 15) {
-                            ForEach(difficulties, id: \.self) { level in
-                                HStack {
-                                    Image(systemName: difficulty == level ? "circle.fill" : "circle")
-                                        .foregroundStyle(difficulty == level ? .blue : .secondary)
-                                    Text(level)
-                                        .font(.subheadline)
-                                }
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    difficulty = level
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Durations
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Durations")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                        
-                        VStack(spacing: 15) {
-                            HStack {
-                                Text("Total Duration")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(totalDuration) min")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Slider(value: Binding(
-                                get: { Double(totalDuration) },
-                                set: { totalDuration = Int($0) }
-                            ), in: 1...120, step: 1) {
-                                Text("Total Duration")
-                            } minimumValueLabel: {
-                                Image(systemName: "clock")
-                            } maximumValueLabel: {
-                                Image(systemName: "clock.fill")
-                            }
-                            
-                            HStack {
-                                Text("Exercise Duration")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(exerciseDuration) sec")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Slider(value: Binding(
-                                get: { Double(exerciseDuration) },
-                                set: { exerciseDuration = Int($0) }
-                            ), in: 1...120, step: 1) {
-                                Text("Exercise Duration")
-                            } minimumValueLabel: {
-                                Image(systemName: "timer")
-                            } maximumValueLabel: {
-                                Image(systemName: "timer")
-                            }
-                            
-                            HStack {
-                                Text("Rest Duration")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(restDuration) sec")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Slider(value: Binding(
-                                get: { Double(restDuration) },
-                                set: { restDuration = Int($0) }
-                            ), in: 1...120, step: 1) {
-                                Text("Rest Duration")
-                            } minimumValueLabel: {
-                                Image(systemName: "pause")
-                            } maximumValueLabel: {
-                                Image(systemName: "pause.fill")
-                            }
-                            
-                            HStack {
-                                Text("Rest Every Nth Exercises")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(restEvery)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Slider(value: Binding(
-                                get: { Double(restEvery) },
-                                set: { restEvery = Int($0) }
-                            ), in: 1...20, step: 1) {
-                                Text("Rest Every Nth Exercises")
-                            } minimumValueLabel: {
-                                Image(systemName: "1.circle")
-                            } maximumValueLabel: {
-                                Image(systemName: "20.circle.fill")
-                            }
-                        }
-                    }
-                    
-                    // Feedback Settings
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Feedback")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-
-                        VStack(spacing: 10) {
-#if os(iOS) || os(tvOS) || os(visionOS)
-                            Toggle(isOn: $enableSound_iOS_tv_vision) {
-                                Label("Sounds (iOS/tvOS/visionOS)", systemImage: enableSound_iOS_tv_vision ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                            }
-#endif
-#if os(iOS) || os(visionOS)
-                            Toggle(isOn: $enableHaptics_iOS_vision) {
-                                Label("Haptics (iOS/visionOS)", systemImage: enableHaptics_iOS_vision ? "hand.tap.fill" : "hand.raised")
-                            }
-#endif
-#if os(macOS)
-                            Toggle(isOn: $enableSound_macOS) {
-                                Label("Sounds (macOS)", systemImage: enableSound_macOS ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                            }
-#endif
-                        }
-                    }
-                    
-                    // Video Options
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Video Options")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                        
-                        Picker("Video Mode", selection: $videoModeRaw) {
-                            ForEach(VideoMode.allCases) { mode in
-                                Text(mode.rawValue).tag(mode.rawValue)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .onChange(of: videoModeRaw) { _, newValue in
-                            videoManager.videoMode = newValue
-                        }
-                        
-                        if VideoMode(rawValue: videoModeRaw) == .downloadOnFirstLaunch {
-                            if let progress = downloadProgress {
-                                Text("Downloading videos \(progress.completed) of \(progress.total)...")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Button("Download Videos") {
-                                    startVideoDownload()
-                                }
-                                .buttonStyle(.borderedProminent)
-                            }
-                        }
-                    }
-                    
-                    // Generate Button
-                    Button {
-                        generateWorkout()
-                    } label: {
-                        HStack {
-                            if isGenerating {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                Text("Generating workout...")
-                            } else {
-                                Text("Generate Workout")
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(.blue)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .disabled(isGenerating || selectedFocusAreas.isEmpty)
-                    
-                    // Generated Routine
-                    if !generatedRoutine.isEmpty {
+                        // View Exercises
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Generated Routine")
+                            Button {
+                                // Navigate to the Exercises view
+                            } label: {
+                                NavigationLink(destination: ExercisesView(exercisesByArea: exercises)) {
+                                    HStack {
+                                        Image(systemName: "list.bullet.rectangle.portrait")
+                                        Text("View Exercises")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(.purple)
+                                    .foregroundStyle(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                }
+                            }
+                        }
+                        
+                        // Focus Areas
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Focus Areas")
                                 .font(.title2)
                                 .fontWeight(.semibold)
                             
-                            LazyVStack(alignment: .leading, spacing: 8) {
-                                ForEach(Array(generatedRoutine.enumerated()), id: \.offset) { index, exercise in
+                            HStack {
+                                Toggle(isOn: Binding(
+                                    get: { selectedFocusAreas.count == focusAreas.count },
+                                    set: { newValue in
+                                        if newValue {
+                                            selectedFocusAreas = Set(focusAreas)
+                                        } else {
+                                            selectedFocusAreas.removeAll()
+                                        }
+                                    }
+                                )) {
+                                    Label("Select All", systemImage: selectedFocusAreas.count == focusAreas.count ? "checkmark.square.fill" : "square")
+                                }
+                                .toggleStyle(.switch)
+                            }
+                            
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
+                                ForEach(focusAreas, id: \.self) { area in
                                     HStack {
-                                        Text("\(index + 1).")
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 30, alignment: .leading)
-                                        Text(exercise.name)
+                                        Image(systemName: selectedFocusAreas.contains(area) ? "checkmark.square.fill" : "square")
+                                            .foregroundStyle(selectedFocusAreas.contains(area) ? .blue : .secondary)
+                                        Text(area)
                                             .font(.subheadline)
                                         Spacer()
                                     }
-                                    .padding(.vertical, 2)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if selectedFocusAreas.contains(area) {
+                                            selectedFocusAreas.remove(area)
+                                        } else {
+                                            selectedFocusAreas.insert(area)
+                                        }
+                                    }
                                 }
-                            }
-                            .padding()
-                            .background(.gray.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            
-                            Button {
-                                showingWorkout = true
-                            } label: {
-                                HStack {
-                                    Image(systemName: "play.fill")
-                                    Text("Start Workout")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(.green)
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
                         }
+                        
+                        // Difficulty
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Difficulty")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                            
+                            HStack(spacing: 15) {
+                                ForEach(difficulties, id: \.self) { level in
+                                    HStack {
+                                        Image(systemName: difficulty == level ? "circle.fill" : "circle")
+                                            .foregroundStyle(difficulty == level ? .blue : .secondary)
+                                        Text(level)
+                                            .font(.subheadline)
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        difficulty = level
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Durations
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Durations")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                            
+                            VStack(spacing: 15) {
+                                HStack {
+                                    Text("Total Duration")
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Text("\(totalDuration) min")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Slider(value: Binding(
+                                    get: { Double(totalDuration) },
+                                    set: { totalDuration = Int($0) }
+                                ), in: 1...120, step: 1) {
+                                    Text("Total Duration")
+                                } minimumValueLabel: {
+                                    Image(systemName: "clock")
+                                } maximumValueLabel: {
+                                    Image(systemName: "clock.fill")
+                                }
+                                
+                                HStack {
+                                    Text("Exercise Duration")
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Text("\(exerciseDuration) sec")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Slider(value: Binding(
+                                    get: { Double(exerciseDuration) },
+                                    set: { exerciseDuration = Int($0) }
+                                ), in: 1...120, step: 1) {
+                                    Text("Exercise Duration")
+                                } minimumValueLabel: {
+                                    Image(systemName: "timer")
+                                } maximumValueLabel: {
+                                    Image(systemName: "timer")
+                                }
+                                
+                                HStack {
+                                    Text("Rest Duration")
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Text("\(restDuration) sec")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Slider(value: Binding(
+                                    get: { Double(restDuration) },
+                                    set: { restDuration = Int($0) }
+                                ), in: 1...120, step: 1) {
+                                    Text("Rest Duration")
+                                } minimumValueLabel: {
+                                    Image(systemName: "pause")
+                                } maximumValueLabel: {
+                                    Image(systemName: "pause.fill")
+                                }
+                                
+                                HStack {
+                                    Text("Rest Every Nth Exercises")
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Text("\(restEvery)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Slider(value: Binding(
+                                    get: { Double(restEvery) },
+                                    set: { restEvery = Int($0) }
+                                ), in: 1...20, step: 1) {
+                                    Text("Rest Every Nth Exercises")
+                                } minimumValueLabel: {
+                                    Image(systemName: "1.circle")
+                                } maximumValueLabel: {
+                                    Image(systemName: "20.circle.fill")
+                                }
+                            }
+                        }
+                        
+                        // Feedback Settings
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Feedback")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+
+                            VStack(spacing: 10) {
+#if os(iOS) || os(tvOS) || os(visionOS)
+                                Toggle(isOn: $enableSound_iOS_tv_vision) {
+                                    Label("Sounds (iOS/tvOS/visionOS)", systemImage: enableSound_iOS_tv_vision ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                }
+#endif
+#if os(iOS) || os(visionOS)
+                                Toggle(isOn: $enableHaptics_iOS_vision) {
+                                    Label("Haptics (iOS/visionOS)", systemImage: enableHaptics_iOS_vision ? "hand.tap.fill" : "hand.raised")
+                                }
+#endif
+#if os(macOS)
+                                Toggle(isOn: $enableSound_macOS) {
+                                    Label("Sounds (macOS)", systemImage: enableSound_macOS ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                }
+#endif
+                            }
+                        }
+                        
+                        // Video Options
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Video Options")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                            
+                            Picker("Video Mode", selection: $videoModeRaw) {
+                                ForEach(VideoMode.allCases) { mode in
+                                    Text(mode.rawValue).tag(mode.rawValue)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .onChange(of: videoModeRaw) { _, newValue in
+                                videoManager.videoMode = newValue
+                            }
+                            
+                            if VideoMode(rawValue: videoModeRaw) == .downloadOnFirstLaunch {
+                                if let progress = downloadProgress {
+                                    Text("Downloading videos \(progress.completed) of \(progress.total)...")
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Button("Download Videos") {
+                                        startVideoDownload()
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                }
+                            }
+                        }
+                        
+                        // Generate Button
+                        Button {
+                            generateWorkout()
+                            // Attempt to auto-scroll to the generated section after state updates
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                withAnimation {
+                                    proxy.scrollTo(scrollToGeneratedToken, anchor: .top)
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                if isGenerating {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                    Text("Generating workout...")
+                                } else {
+                                    Text("Generate Workout")
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(.blue)
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .disabled(isGenerating || selectedFocusAreas.isEmpty)
+                        
+                        if !generatedRoutine.isEmpty {
+                            Text("Workout generated below")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        // Generated Routine
+                        if !generatedRoutine.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Generated Routine")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                                
+                                LazyVStack(alignment: .leading, spacing: 8) {
+                                    ForEach(Array(generatedRoutine.enumerated()), id: \.offset) { index, exercise in
+                                        HStack {
+                                            Text("\(index + 1).")
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                                .frame(width: 30, alignment: .leading)
+                                            Text(exercise.name)
+                                                .font(.subheadline)
+                                            Spacer()
+                                        }
+                                        .padding(.vertical, 2)
+                                    }
+                                }
+                                .padding()
+                                .background(.gray.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                
+                                Button {
+                                    showingWorkout = true
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "play.fill")
+                                        Text("Start Workout")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(.green)
+                                    .foregroundStyle(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                }
+                            }
+                            .id(scrollToGeneratedToken)
+                        }
                     }
+                    .padding()
                 }
-                .padding()
             }
             .navigationTitle("Workout Generator")
         }
@@ -561,6 +577,7 @@ struct WorkoutGeneratorView: View {
             
             generatedRoutine = routine
             isGenerating = false
+            scrollToGeneratedToken = UUID()
         }
     }
     
@@ -643,94 +660,113 @@ struct WorkoutPlayerView: View {
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 30) {
-                Spacer()
-                
-                if VideoMode(rawValue: videoManager.videoMode) != Optional.none {
-                    if let player = avPlayer {
-                        VideoPlayer(player: player)
-                            .frame(height: 220)
-                            .cornerRadius(10)
-                    } else if videoURL != nil {
-                        // Placeholder until player prepared
-                        Rectangle()
-                            .fill(Color.black.opacity(0.1))
-                            .frame(height: 220)
-                            .cornerRadius(10)
+            GeometryReader { proxy in
+                let height = proxy.size.height
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Video
+                        if VideoMode(rawValue: videoManager.videoMode) != Optional.none {
+                            if let player = avPlayer {
+                                VideoPlayer(player: player)
+#if os(iOS)
+                                    .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 280 : 200)
+#else
+                                    .frame(height: 220)
+#endif
+                                    .cornerRadius(10)
+                            } else if videoURL != nil {
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.1))
+#if os(iOS)
+                                    .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 280 : 200)
+#else
+                                    .frame(height: 220)
+#endif
+                                    .cornerRadius(10)
+                            }
+                        }
+
+                        // Exercise Name
+                        Text(currentExercise?.name ?? "Workout Complete")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                            .multilineTextAlignment(.center)
+
+                        // Timer
+                        Text(timeRemaining > 0 ? "\(timeRemaining)" : "00")
+                            .font(.system(size: 80, weight: .bold, design: .monospaced))
+                            .foregroundStyle(timeRemaining <= 3 && timeRemaining > 0 ? .red : .primary)
+
+                        // Progress
+                        if currentIndex < routine.count {
+                            Text("Exercise \(currentIndex + 1) of \(routine.count)")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        // Add bottom spacer to create breathing room when controls are inset
+                        Spacer(minLength: 60)
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .frame(minHeight: height) // keep centered when space allows
                 }
-                
-                // Exercise Name
-                Text(currentExercise?.name ?? "Workout Complete")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .multilineTextAlignment(.center)
-                
-                // Timer
-                Text(timeRemaining > 0 ? "\(timeRemaining)" : "00")
-                    .font(.system(size: 80, weight: .bold, design: .monospaced))
-                    .foregroundStyle(timeRemaining <= 3 && timeRemaining > 0 ? .red : .primary)
-                
-                // Progress
-                if currentIndex < routine.count {
-                    Text("Exercise \(currentIndex + 1) of \(routine.count)")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                }
-                
-                Spacer()
-                
-                // Controls
-                HStack(spacing: 40) {
-                    if !isPlaying {
-                        Button {
-                            startWorkout()
-                        } label: {
-                            VStack {
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 30))
-                                Text("Start")
-                                    .font(.caption)
+                .safeAreaInset(edge: .bottom) {
+                    HStack(spacing: 40) {
+                        if !isPlaying {
+                            Button {
+                                startWorkout()
+                            } label: {
+                                VStack {
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 30))
+                                    Text("Start")
+                                        .font(.caption)
+                                }
+                                .frame(width: 80, height: 80)
+                                .background(.green)
+                                .foregroundStyle(.white)
+                                .clipShape(Circle())
                             }
-                            .frame(width: 80, height: 80)
-                            .background(.green)
-                            .foregroundStyle(.white)
-                            .clipShape(Circle())
-                        }
-                    } else {
-                        Button {
-                            togglePause()
-                        } label: {
-                            VStack {
-                                Image(systemName: isPaused ? "play.fill" : "pause.fill")
-                                    .font(.system(size: 30))
-                                Text(isPaused ? "Resume" : "Pause")
-                                    .font(.caption)
+                        } else {
+                            Button {
+                                togglePause()
+                            } label: {
+                                VStack {
+                                    Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                                        .font(.system(size: 30))
+                                    Text(isPaused ? "Resume" : "Pause")
+                                        .font(.caption)
+                                }
+                                .frame(width: 80, height: 80)
+                                .background(.blue)
+                                .foregroundStyle(.white)
+                                .clipShape(Circle())
                             }
-                            .frame(width: 80, height: 80)
-                            .background(.blue)
-                            .foregroundStyle(.white)
-                            .clipShape(Circle())
-                        }
-                        
-                        Button {
-                            skipExercise()
-                        } label: {
-                            VStack {
-                                Image(systemName: "forward.fill")
-                                    .font(.system(size: 30))
-                                Text("Skip")
-                                    .font(.caption)
+
+                            Button {
+                                skipExercise()
+                            } label: {
+                                VStack {
+                                    Image(systemName: "forward.fill")
+                                        .font(.system(size: 30))
+                                    Text("Skip")
+                                        .font(.caption)
+                                }
+                                .frame(width: 80, height: 80)
+                                .background(.orange)
+                                .foregroundStyle(.white)
+                                .clipShape(Circle())
                             }
-                            .frame(width: 80, height: 80)
-                            .background(.orange)
-                            .foregroundStyle(.white)
-                            .clipShape(Circle())
                         }
                     }
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(.thinMaterial)
+                    .shadow(radius: 2)
+                    .padding(.horizontal)
                 }
             }
-            .padding()
             .navigationTitle("Workout")
 #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
