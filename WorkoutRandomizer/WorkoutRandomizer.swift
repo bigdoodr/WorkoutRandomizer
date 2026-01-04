@@ -14,6 +14,20 @@ private enum FeedbackEvent {
 
 @main
 struct WorkoutGeneratorApp: App {
+    init() {
+#if canImport(AVFoundation)
+    #if os(iOS) || os(tvOS) || os(visionOS)
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            // Ignore configuration errors; we'll try again when needed
+        }
+    #endif
+#endif
+    }
+    
     var body: some Scene {
         WindowGroup {
             WorkoutGeneratorView()
@@ -815,6 +829,7 @@ struct WorkoutPlayerView: View {
         }
         let playerItem = AVPlayerItem(url: url)
         let player = avPlayer ?? AVPlayer()
+        player.isMuted = true
         player.replaceCurrentItem(with: playerItem)
         player.actionAtItemEnd = .none
         // Loop when the item ends
@@ -873,7 +888,7 @@ struct WorkoutPlayerView: View {
         // Ensure session and engine are ready
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .default)
+            // Removed setCategory call here per instructions
             try audioSession.setActive(true)
         } catch { }
 

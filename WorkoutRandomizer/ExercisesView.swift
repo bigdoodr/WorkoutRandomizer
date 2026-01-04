@@ -228,6 +228,7 @@ private struct ExerciseRow: View {
 #if canImport(AVKit)
         let item = AVPlayerItem(url: url)
         let player = AVPlayer(playerItem: item)
+        player.isMuted = true
         return player
 #else
         return nil
