@@ -6,6 +6,55 @@ import AVFoundation
 import AVKit
 #endif
 
+#if os(macOS)
+import AppKit
+import AVFoundation
+
+struct AVPlayerLayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        view.playerLayer.player = player
+        return view
+    }
+
+    func updateNSView(_ nsView: PlayerContainerView, context: Context) {
+        // Keep the player current and ensure layout updates
+        if nsView.playerLayer.player !== player {
+            nsView.playerLayer.player = player
+        }
+        nsView.needsLayout = true
+        nsView.layoutSubtreeIfNeeded()
+    }
+}
+
+final class PlayerContainerView: NSView {
+    let playerLayer = AVPlayerLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer = CALayer()
+        playerLayer.videoGravity = .resizeAspect
+        layer?.addSublayer(playerLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+        layer = CALayer()
+        playerLayer.videoGravity = .resizeAspect
+        layer?.addSublayer(playerLayer)
+    }
+
+    override func layout() {
+        super.layout()
+        playerLayer.frame = bounds
+    }
+}
+#endif
+
 private enum FeedbackEvent {
     case start
     case warning
@@ -681,21 +730,23 @@ struct WorkoutPlayerView: View {
                         // Video
                         if VideoMode(rawValue: videoManager.videoMode) != Optional.none {
                             if let player = avPlayer {
-                                VideoPlayer(player: player)
-#if os(iOS)
-                                    .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 280 : 200)
-#else
+                                #if os(macOS)
+                                AVPlayerLayerView(player: player)
                                     .frame(height: 220)
-#endif
                                     .cornerRadius(10)
+                                #else
+                                VideoPlayer(player: player)
+                                    .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 280 : 200)
+                                    .cornerRadius(10)
+                                #endif
                             } else if videoURL != nil {
                                 Rectangle()
                                     .fill(Color.black.opacity(0.1))
-#if os(iOS)
+                                #if os(iOS)
                                     .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 280 : 200)
-#else
+                                #else
                                     .frame(height: 220)
-#endif
+                                #endif
                                     .cornerRadius(10)
                             }
                         }
@@ -721,9 +772,8 @@ struct WorkoutPlayerView: View {
                         // Add bottom spacer to create breathing room when controls are inset
                         Spacer(minLength: 60)
                     }
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .padding()
-                    .frame(minHeight: height) // keep centered when space allows
                 }
                 .safeAreaInset(edge: .bottom) {
                     HStack(spacing: 40) {
@@ -802,6 +852,9 @@ struct WorkoutPlayerView: View {
                 }
 #endif
             }
+#if os(macOS)
+            .frame(minWidth: 800, minHeight: 600)
+#endif
         }
         .onAppear {
             setupAudio()

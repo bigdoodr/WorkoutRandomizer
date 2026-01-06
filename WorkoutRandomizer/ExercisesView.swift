@@ -212,12 +212,7 @@ private struct ExerciseRow: View {
                 .aspectRatio(16/9, contentMode: .fit)
                 .frame(minWidth: 640, minHeight: 360)
                 .onAppear { identified.player.play() }
-                .onDisappear {
-                    identified.player.pause()
-                }
-                #if os(macOS)
-                .presentationSizing(.fitted)
-                #endif
+                .onDisappear { identified.player.pause() }
 #else
             Text("Video not supported on this platform")
 #endif
