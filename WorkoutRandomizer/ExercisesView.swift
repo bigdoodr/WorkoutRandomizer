@@ -29,6 +29,12 @@ struct ExercisesView: View {
     @State private var selectedDifficulty: String = "All"
     @StateObject private var videoManager = VideoManager.shared
 
+    @State private var sheetEntry: CatalogEntry? = nil
+    @State private var sheetPlayer: AVPlayer? = nil
+    @State private var isPresentingVideo: Bool = false
+    @State private var statusObservation: NSKeyValueObservation? = nil
+    @State private var isLoadingVideo: Bool = false
+
     private var areas: [String] {
         ["All"] + exercisesByArea.keys.sorted()
     }
@@ -58,6 +64,52 @@ struct ExercisesView: View {
             return lhs.exercise.name < rhs.exercise.name
         }
     }
+    
+    private func prepareAndPresent(entry: CatalogEntry) {
+        // Prevent overlapping presentations
+        guard !isPresentingVideo else { return }
+        guard let url = VideoManager.shared.url(for: entry.exercise.name) else { return }
+
+        // Present the sheet immediately with a loading placeholder
+        isPresentingVideo = true
+        isLoadingVideo = true
+        sheetPlayer = nil
+        sheetEntry = entry
+
+#if canImport(AVKit)
+        let item = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: item)
+        player.isMuted = true
+        player.automaticallyWaitsToMinimizeStalling = false
+
+        // Use public KVO on status (retain observation in state so it lives past this function scope)
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { _, _ in
+            if item.status == .readyToPlay {
+                statusObservation?.invalidate()
+                statusObservation = nil
+                DispatchQueue.main.async {
+                    // Start playback and then swap the player into the sheet after a short delay
+                    player.play()
+                    // Give the player layer a moment to produce a frame before swapping in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        sheetPlayer = player
+                        isLoadingVideo = false
+                    }
+                }
+            } else if item.status == .failed {
+                statusObservation?.invalidate()
+                statusObservation = nil
+                DispatchQueue.main.async {
+                    isPresentingVideo = false
+                }
+            }
+        }
+        _ = statusObservation
+#else
+        // Non-AVKit platforms: do nothing
+        return
+#endif
+    }
 
     var body: some View {
         List {
@@ -73,7 +125,9 @@ struct ExercisesView: View {
                                         .foregroundStyle(.secondary)
                                 } else {
                                     ForEach(items) { entry in
-                                        ExerciseRow(entry: entry)
+                                        ExerciseRow(entry: entry) {
+                                            prepareAndPresent(entry: entry)
+                                        }
                                     }
                                 }
                             }
@@ -145,6 +199,37 @@ struct ExercisesView: View {
             }
 #endif
         }
+        .sheet(item: $sheetEntry, onDismiss: {
+            sheetPlayer?.pause()
+            sheetPlayer = nil
+            isLoadingVideo = false
+            isPresentingVideo = false
+        }) { _ in
+#if canImport(AVKit)
+            if isLoadingVideo || sheetPlayer == nil {
+                VStack(spacing: 12) {
+                    ProgressView("Loading…")
+                    Text("Preparing video")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(minWidth: 640, minHeight: 360)
+            } else if let player = sheetPlayer {
+                #if os(macOS)
+                AVPlayerLayerView(player: player)
+                    .frame(minWidth: 640, minHeight: 360)
+                    .onDisappear { player.pause() }
+                #else
+                VideoPlayer(player: player)
+                    .aspectRatio(16/9, contentMode: .fit)
+                    .frame(minWidth: 640, minHeight: 360)
+                    .onDisappear { player.pause() }
+                #endif
+            }
+#else
+            Text("Video not supported on this platform")
+#endif
+        }
     }
 
     // Build grouped structure once for List rendering
@@ -158,14 +243,8 @@ struct ExercisesView: View {
 }
 
 private struct ExerciseRow: View {
-    private struct IdentifiedPlayer: Identifiable {
-        let id = UUID()
-        let player: AVPlayer
-    }
-
     let entry: CatalogEntry
-    @State private var avPlayer: AVPlayer? = nil
-    @State private var presentedPlayerItem: IdentifiedPlayer? = nil
+    let onPlay: () -> Void
 
     var body: some View {
         let videoManager = VideoManager.shared
@@ -180,14 +259,9 @@ private struct ExerciseRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if let url = videoURL {
+            if videoURL != nil {
                 Button {
-                    guard presentedPlayerItem == nil else { return }
-                    if let player = makePlayer(for: url) {
-                        avPlayer = player
-                        let identified = IdentifiedPlayer(player: player)
-                        presentedPlayerItem = identified
-                    }
+                    onPlay()
                 } label: {
                     Image(systemName: "play.circle.fill")
                         .font(.title2)
@@ -196,38 +270,8 @@ private struct ExerciseRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            guard presentedPlayerItem == nil else { return }
-            if let url = videoURL, let player = makePlayer(for: url) {
-                avPlayer = player
-                let identified = IdentifiedPlayer(player: player)
-                presentedPlayerItem = identified
-            }
+            if videoURL != nil { onPlay() }
         }
-        .sheet(item: $presentedPlayerItem, onDismiss: {
-            avPlayer?.pause()
-            avPlayer = nil
-        }) { identified in
-#if canImport(AVKit)
-            VideoPlayer(player: identified.player)
-                .aspectRatio(16/9, contentMode: .fit)
-                .frame(minWidth: 640, minHeight: 360)
-                .onAppear { identified.player.play() }
-                .onDisappear { identified.player.pause() }
-#else
-            Text("Video not supported on this platform")
-#endif
-        }
-    }
-
-    private func makePlayer(for url: URL) -> AVPlayer? {
-#if canImport(AVKit)
-        let item = AVPlayerItem(url: url)
-        let player = AVPlayer(playerItem: item)
-        player.isMuted = true
-        return player
-#else
-        return nil
-#endif
     }
 }
 
