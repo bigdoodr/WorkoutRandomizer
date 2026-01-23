@@ -29,6 +29,19 @@ struct ExercisesView: View {
     @State private var selectedDifficulty: String = "All"
     @StateObject private var videoManager = VideoManager.shared
 
+    // Detect when the app is configured to not show videos by checking if no URLs can be resolved
+    private var isNoVideoMode: Bool {
+        // If none of the visible exercises can produce a URL, assume videos are disabled
+        // Use a small subset to keep it cheap
+        let sample = filteredCatalog.prefix(10)
+        for entry in sample {
+            if VideoManager.shared.url(for: entry.exercise.name) != nil {
+                return false
+            }
+        }
+        return true
+    }
+
     @State private var sheetEntry: CatalogEntry? = nil
     @State private var sheetPlayer: AVPlayer? = nil
     @State private var isPresentingVideo: Bool = false
@@ -113,6 +126,19 @@ struct ExercisesView: View {
 
     var body: some View {
         List {
+            if isNoVideoMode {
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Video examples are disabled")
+                            .font(.callout)
+                            .bold()
+                        Text("Switch to \"Stream\" or \"Download All\" on the main page to view video demos.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
             // Group by Focus Area, then Difficulty
             ForEach(groupedByArea.keys.sorted(), id: \.self) { area in
                 Section(header: Text(area)) {
