@@ -115,20 +115,16 @@ struct ExercisesView: View {
         List {
             // Group by Focus Area, then Difficulty
             ForEach(groupedByArea.keys.sorted(), id: \.self) { area in
-                if selectedArea == "All" || selectedArea == area {
-                    Section(header: Text(area)) {
-                        ForEach(groupedByArea[area]!.keys.sorted(), id: \.self) { diff in
-                            if selectedDifficulty == "All" || selectedDifficulty == diff {
-                                let items = groupedByArea[area]![diff]!
-                                if items.isEmpty {
-                                    Text("No exercises")
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    ForEach(items) { entry in
-                                        ExerciseRow(entry: entry) {
-                                            prepareAndPresent(entry: entry)
-                                        }
-                                    }
+                Section(header: Text(area)) {
+                    ForEach((groupedByArea[area]?.keys.sorted() ?? []), id: \.self) { diff in
+                        let items = groupedByArea[area]?[diff] ?? []
+                        if items.isEmpty {
+                            Text("No exercises")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(items, id: \.exercise.name) { entry in
+                                ExerciseRow(entry: entry) {
+                                    prepareAndPresent(entry: entry)
                                 }
                             }
                         }
