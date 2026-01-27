@@ -59,6 +59,7 @@ private enum FeedbackEvent {
     case start
     case warning
     case end
+    case complete
 }
 
 @main
@@ -905,8 +906,9 @@ struct WorkoutPlayerView: View {
             let node = AVAudioPlayerNode()
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: hwFormat)
-            // Also ensure mixer to output uses compatible format
             engine.connect(engine.mainMixerNode, to: output, format: hwFormat)
+            engine.mainMixerNode.outputVolume = 1.0
+            engine.mainMixerNode.volume = 1.0
             audioEngine = engine
             playerNode = node
             do {
@@ -931,6 +933,11 @@ struct WorkoutPlayerView: View {
                 NSSound.beep(); NSSound.beep()
             case .end:
                 NSSound.beep(); DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { NSSound.beep() }
+            case .complete:
+                // Triple-beep pattern to indicate completion
+                NSSound.beep()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { NSSound.beep() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { NSSound.beep() }
             }
         }
         return
@@ -941,8 +948,8 @@ struct WorkoutPlayerView: View {
         // Ensure session and engine are ready
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            // Removed setCategory call here per instructions
-            try audioSession.setActive(true)
+            try audioSession.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try audioSession.setActive(true, options: [])
         } catch { }
 
         if audioEngine == nil || playerNode == nil { setupAudio() }
@@ -956,30 +963,75 @@ struct WorkoutPlayerView: View {
             node = newNode
         }
         if !engine.isRunning { try? engine.start() }
+        engine.mainMixerNode.outputVolume = 1.0
+        engine.mainMixerNode.volume = 1.0
 
-        // Choose tone by event
         let mixerFormat = engine.mainMixerNode.outputFormat(forBus: 0)
         let sampleRate = mixerFormat.sampleRate
-        let (frequency, duration): (Double, Double)
-        switch event {
-        case .start: frequency = 880; duration = 0.15 // A5 short
-        case .warning: frequency = 1200; duration = 0.12 // higher quick chirp
-        case .end: frequency = 523.25; duration = 0.25 // C5 longer
-        }
-        let frameCount = AVAudioFrameCount(sampleRate * duration)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: mixerFormat, frameCapacity: frameCount) else { return }
-        buffer.frameLength = frameCount
-        // Fill all channels consistently
-        let channelCount = Int(mixerFormat.channelCount)
-        for ch in 0..<channelCount {
-            if let data = buffer.floatChannelData?[ch] {
-                for i in 0..<Int(frameCount) {
-                    let sample = sin(2.0 * Double.pi * frequency * Double(i) / sampleRate)
-                    data[i] = Float(sample * 0.5)
+
+        func makeBuffer(freq: Double, dur: Double, bright: Bool = false, gain: Double = 0.8) -> AVAudioPCMBuffer? {
+            let frames = AVAudioFrameCount(sampleRate * dur)
+            guard let buf = AVAudioPCMBuffer(pcmFormat: mixerFormat, frameCapacity: frames) else { return nil }
+            buf.frameLength = frames
+
+            // Simple ADSR envelope (attack/decay only for short bleeps)
+            let attack = Int(0.005 * sampleRate) // 5ms
+            let decay = Int(0.06 * sampleRate)   // 60ms
+            let sustainLevel = 0.7
+            let total = Int(frames)
+
+            let channelCount = Int(mixerFormat.channelCount)
+            for ch in 0..<channelCount {
+                if let data = buf.floatChannelData?[ch] {
+                    for i in 0..<total {
+                        // Waveform: sine (warm) or square-ish (bright)
+                        let t = Double(i) / sampleRate
+                        let phase = 2.0 * Double.pi * freq * t
+                        let raw: Double
+                        if bright {
+                            // Square-like using sign(sin) with mild low-pass blend
+                            let s = sin(phase)
+                            raw = 0.8 * (s >= 0 ? 1.0 : -1.0) + 0.2 * s
+                        } else {
+                            raw = sin(phase)
+                        }
+                        // Envelope
+                        let amp: Double
+                        if i < attack {
+                            amp = Double(i) / Double(max(1, attack))
+                        } else if i < attack + decay {
+                            let d = Double(i - attack) / Double(max(1, decay))
+                            amp = 1.0 - (1.0 - sustainLevel) * d
+                        } else {
+                            amp = sustainLevel
+                        }
+                        data[i] = Float(raw * amp * gain)
+                    }
                 }
             }
+            return buf
         }
-        node.scheduleBuffer(buffer, completionHandler: nil)
+
+        let (frequency, duration, bright, gain): (Double, Double, Bool, Double)
+        switch event {
+        case .start:    (frequency, duration, bright, gain) = (880, 0.12, false, 0.9)     // A5 short
+        case .warning:  (frequency, duration, bright, gain) = (1400, 0.10, true, 1.0)     // brighter chirp
+        case .end:      (frequency, duration, bright, gain) = (523.25, 0.22, false, 0.95) // C5
+        case .complete: (frequency, duration, bright, gain) = (659.25, 0.18, true, 1.0)   // E5
+        }
+
+        if event == .complete {
+            let freqs = [frequency, frequency * 1.2, frequency * 1.5]
+            for f in freqs {
+                if let buf = makeBuffer(freq: f, dur: 0.16, bright: true, gain: 1.0) {
+                    node.scheduleBuffer(buf, completionHandler: nil)
+                }
+            }
+        } else {
+            if let buf = makeBuffer(freq: frequency, dur: duration, bright: bright, gain: gain) {
+                node.scheduleBuffer(buf, completionHandler: nil)
+            }
+        }
         if !node.isPlaying { node.play() }
     #endif
 #endif
@@ -998,6 +1050,9 @@ struct WorkoutPlayerView: View {
             let g = UIImpactFeedbackGenerator(style: .rigid)
             g.prepare(); g.impactOccurred(intensity: 1.0); generator = g
         case .end:
+            let g = UINotificationFeedbackGenerator()
+            g.prepare(); g.notificationOccurred(.success); generator = g
+        case .complete:
             let g = UINotificationFeedbackGenerator()
             g.prepare(); g.notificationOccurred(.success); generator = g
         }
@@ -1036,6 +1091,7 @@ struct WorkoutPlayerView: View {
         
         if currentIndex >= routine.count {
             // Workout complete
+            playFeedback(.complete)
             stopWorkout()
             return
         }
