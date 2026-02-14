@@ -228,25 +228,43 @@ struct ExercisesView: View {
             isPresentingVideo = false
         }) { _ in
 #if canImport(AVKit)
-            if isLoadingVideo || sheetPlayer == nil {
-                VStack(spacing: 12) {
-                    ProgressView("Loading…")
-                    Text("Preparing video")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            ZStack(alignment: .topLeading) {
+                if isLoadingVideo || sheetPlayer == nil {
+                    VStack(spacing: 12) {
+                        ProgressView("Loading…")
+                        Text("Preparing video")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(minWidth: 640, minHeight: 360)
+                } else if let player = sheetPlayer {
+                    #if os(macOS)
+                    AVPlayerLayerView(player: player)
+                        .frame(minWidth: 640, minHeight: 360)
+                        .onDisappear { player.pause() }
+                    #else
+                    VideoPlayer(player: player)
+                        .aspectRatio(16/9, contentMode: .fit)
+                        .frame(minWidth: 640, minHeight: 360)
+                        .onDisappear { player.pause() }
+                    #endif
                 }
-                .frame(minWidth: 640, minHeight: 360)
-            } else if let player = sheetPlayer {
-                #if os(macOS)
-                AVPlayerLayerView(player: player)
-                    .frame(minWidth: 640, minHeight: 360)
-                    .onDisappear { player.pause() }
-                #else
-                VideoPlayer(player: player)
-                    .aspectRatio(16/9, contentMode: .fit)
-                    .frame(minWidth: 640, minHeight: 360)
-                    .onDisappear { player.pause() }
-                #endif
+                
+                // Close button in top-left corner
+                Button {
+                    sheetEntry = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white)
+                        .background(
+                            Circle()
+                                .fill(.black.opacity(0.5))
+                                .padding(-4)
+                        )
+                }
+                .padding(16)
+                .buttonStyle(.plain)
             }
 #else
             Text("Video not supported on this platform")

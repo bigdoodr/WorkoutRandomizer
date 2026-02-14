@@ -448,9 +448,9 @@ struct WorkoutGeneratorView: View {
                                     Label("Sounds (iOS/tvOS/visionOS)", systemImage: enableSound_iOS_tv_vision ? "speaker.wave.2.fill" : "speaker.slash.fill")
                                 }
 #endif
-#if os(iOS) || os(visionOS)
+#if os(iOS)
                                 Toggle(isOn: $enableHaptics_iOS_vision) {
-                                    Label("Haptics (iOS/visionOS)", systemImage: enableHaptics_iOS_vision ? "hand.tap.fill" : "hand.raised")
+                                    Label("Haptics (iOS)", systemImage: enableHaptics_iOS_vision ? "hand.tap.fill" : "hand.raised")
                                 }
 #endif
 #if os(macOS)
@@ -889,31 +889,44 @@ struct WorkoutPlayerView: View {
         return videoManager.url(for: name)
     }
     
+    var nextUpText: String {
+        let nextIndex = currentIndex + 1
+        if nextIndex >= routine.count {
+            return "End of routine"
+        }
+        let nextExercise = routine[nextIndex]
+        if nextExercise.name == "Rest" {
+            return "Rest"
+        } else {
+            return nextExercise.name
+        }
+    }
+    
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
                 let height = proxy.size.height
-                ScrollView {
-                    VStack(spacing: 24) {
+                VStack(spacing: 0) {
+                    VStack(spacing: 16) {
                         // Video
                         if VideoMode(rawValue: videoManager.videoMode) != Optional.none {
                             if let player = avPlayer {
                                 #if os(macOS)
                                 AVPlayerLayerView(player: player)
-                                    .frame(height: 220)
+                                    .frame(height: min(height * 0.35, 220))
                                     .cornerRadius(10)
                                 #else
                                 VideoPlayer(player: player)
-                                    .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 280 : 200)
+                                    .frame(height: min(height * 0.35, UIDevice.current.userInterfaceIdiom == .pad ? 240 : 180))
                                     .cornerRadius(10)
                                 #endif
                             } else if videoURL != nil {
                                 Rectangle()
                                     .fill(Color.black.opacity(0.1))
                                 #if os(iOS)
-                                    .frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 280 : 200)
+                                    .frame(height: min(height * 0.35, UIDevice.current.userInterfaceIdiom == .pad ? 240 : 180))
                                 #else
-                                    .frame(height: 220)
+                                    .frame(height: min(height * 0.35, 220))
                                 #endif
                                     .cornerRadius(10)
                             }
@@ -921,24 +934,39 @@ struct WorkoutPlayerView: View {
 
                         // Exercise Name
                         Text(currentExercise?.name ?? "Workout Complete")
-                            .font(.largeTitle)
+                            .font(.title)
                             .fontWeight(.bold)
                             .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
 
                         // Timer
                         Text(timeRemaining > 0 ? "\(timeRemaining)" : "00")
-                            .font(.system(size: 80, weight: .bold, design: .monospaced))
+                            .font(.system(size: 64, weight: .bold, design: .monospaced))
                             .foregroundStyle(timeRemaining <= 3 && timeRemaining > 0 ? .red : .primary)
 
-                        // Progress
-                        if currentIndex < routine.count {
-                            Text("Exercise \(currentIndex + 1) of \(routine.count)")
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
+                        // Progress and Next up combined
+                        VStack(spacing: 4) {
+                            if currentIndex < routine.count {
+                                Text("Exercise \(currentIndex + 1) of \(routine.count)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            if isPlaying && currentIndex < routine.count {
+                                HStack(spacing: 4) {
+                                    Text("Next:")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(nextUpText)
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
+                                }
+                            }
                         }
 
-                        // Add bottom spacer to create breathing room when controls are inset
-                        Spacer(minLength: 60)
+                        Spacer(minLength: 0)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .padding()
@@ -1205,7 +1233,7 @@ struct WorkoutPlayerView: View {
     }
     
     private func triggerHaptic(for event: FeedbackEvent) {
-#if os(iOS) || os(visionOS)
+#if os(iOS)
         guard enableHaptics_iOS_vision else { return }
         #if canImport(UIKit)
         let generator: UIFeedbackGenerator
