@@ -1,4 +1,5 @@
 import SwiftUI
+internal import UniformTypeIdentifiers
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
@@ -96,6 +97,49 @@ struct WorkoutItem {
     let duration: Int
 }
 
+// MARK: - Import/Export Models
+struct ExportableExercise: Codable, Identifiable {
+    let id: String
+    let name: String
+    let isTimeBased: Bool
+    let exerciseDuration: Int
+    let restDuration: Int
+    let sets: Int
+    
+    init(id: String = UUID().uuidString, name: String, isTimeBased: Bool, exerciseDuration: Int, restDuration: Int, sets: Int) {
+        self.id = id
+        self.name = name
+        self.isTimeBased = isTimeBased
+        self.exerciseDuration = exerciseDuration
+        self.restDuration = restDuration
+        self.sets = sets
+    }
+}
+
+struct WorkoutDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    
+    var exercises: [ExportableExercise]
+    
+    init(exercises: [ExportableExercise]) {
+        self.exercises = exercises
+    }
+    
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        exercises = try JSONDecoder().decode([ExportableExercise].self, from: data)
+    }
+    
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(exercises)
+        return FileWrapper(regularFileWithContents: data)
+    }
+}
+
 struct WorkoutGeneratorView: View {
     @State private var selectedFocusAreas: Set<String> = ["Legs", "Core", "Cardio"]
     @State private var difficulty = "Expert/Advanced"
@@ -107,6 +151,10 @@ struct WorkoutGeneratorView: View {
     @State private var showingWorkout = false
     @State private var isGenerating = false
     @State private var scrollToGeneratedToken = UUID()
+    @State private var showingImportExport = false
+    @State private var showingExporter = false
+    @State private var showingImporter = false
+    @State private var exportDocument: WorkoutDocument?
     
     // Feedback settings
     @State private var enableSound_iOS_tv_vision = true
@@ -500,21 +548,54 @@ struct WorkoutGeneratorView: View {
                                 .background(.gray.opacity(0.1))
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                                 
-                                Button {
-                                    showingWorkout = true
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "play.fill")
-                                        Text("Start Workout")
+                                HStack(spacing: 12) {
+                                    Button {
+                                        showingWorkout = true
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "play.fill")
+                                            Text("Start Workout")
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding()
+                                        .background(.green)
+                                        .foregroundStyle(.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
                                     }
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(.green)
-                                    .foregroundStyle(.white)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    
+                                    Button {
+                                        exportWorkout()
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "square.and.arrow.up")
+                                            Text("Export")
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding()
+                                        .background(.blue)
+                                        .foregroundStyle(.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    }
                                 }
                             }
                             .id(scrollToGeneratedToken)
+                        }
+                        
+                        // Import Workout Button
+                        if generatedRoutine.isEmpty {
+                            Button {
+                                showingImporter = true
+                            } label: {
+                                HStack {
+                                    Image(systemName: "square.and.arrow.down")
+                                    Text("Import Workout")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(.purple)
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
                         }
                     }
                     .padding()
@@ -532,6 +613,41 @@ struct WorkoutGeneratorView: View {
                 enableHaptics_iOS_vision: enableHaptics_iOS_vision,
                 enableSound_macOS: enableSound_macOS
             )
+        }
+        .fileExporter(
+            isPresented: $showingExporter,
+            document: exportDocument,
+            contentType: .json,
+            defaultFilename: "workout.json",
+            onCompletion: { result in
+                switch result {
+                case .success(let url):
+                    print("Workout exported to: \(url)")
+                case .failure(let error):
+                    print("Export failed: \(error.localizedDescription)")
+                }
+                exportDocument = nil
+            }
+        )
+        .fileImporter(
+            isPresented: $showingImporter,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                do {
+                    let data = try Data(contentsOf: url)
+                    let exercises = try JSONDecoder().decode([ExportableExercise].self, from: data)
+                    let document = WorkoutDocument(exercises: exercises)
+                    importWorkout(from: document)
+                } catch {
+                    print("Import failed: \(error.localizedDescription)")
+                }
+            case .failure(let error):
+                print("File selection failed: \(error.localizedDescription)")
+            }
         }
         .onAppear {
             if !videoManager.didPromptForVideoMode {
@@ -682,6 +798,57 @@ struct WorkoutGeneratorView: View {
         }
         
         return result
+    }
+    
+    private func exportWorkout() {
+        let exportableExercises = generatedRoutine.map { exercise in
+            ExportableExercise(
+                name: exercise.name,
+                isTimeBased: true,
+                exerciseDuration: exercise.name == "Rest" ? restDuration : exerciseDuration,
+                restDuration: exercise.name == "Rest" ? 0 : restDuration,
+                sets: 1
+            )
+        }
+        let document = WorkoutDocument(exercises: exportableExercises)
+        exportDocument = document
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            showingExporter = true
+        }
+    }
+    
+    private func importWorkout(from document: WorkoutDocument) {
+        var importedRoutine: [Exercise] = []
+        
+        for exportableExercise in document.exercises {
+            // Try to find matching exercise in our database
+            var foundExercise: Exercise?
+            
+            for (_, difficultyDict) in exercises {
+                for (_, exerciseList) in difficultyDict {
+                    if let match = exerciseList.first(where: { $0.name == exportableExercise.name }) {
+                        foundExercise = match
+                        break
+                    }
+                }
+                if foundExercise != nil { break }
+            }
+            
+            // If found, use it; otherwise create a basic exercise with no video
+            let exercise = foundExercise ?? Exercise(name: exportableExercise.name, videoPath: nil)
+            importedRoutine.append(exercise)
+            
+            // Update durations from imported data
+            if exportableExercise.isTimeBased {
+                exerciseDuration = exportableExercise.exerciseDuration
+                if exportableExercise.restDuration > 0 {
+                    restDuration = exportableExercise.restDuration
+                }
+            }
+        }
+        
+        generatedRoutine = importedRoutine
+        scrollToGeneratedToken = UUID()
     }
 }
 
@@ -1092,7 +1259,10 @@ struct WorkoutPlayerView: View {
         if currentIndex >= routine.count {
             // Workout complete
             playFeedback(.complete)
-            stopWorkout()
+            // Delay stopping the workout to allow completion sound to finish playing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.stopWorkout()
+            }
             return
         }
         
