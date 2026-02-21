@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		CAD959EB2F413F0600AA3617 /* WorkoutRandomizer for Watch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = CAD959E12F413F0500AA3617 /* WorkoutRandomizer for Watch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		2DF9E2862EF58FD500331F12 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,13 +25,46 @@
 			remoteGlobalIDString = 2DF9E2772EF58FD200331F12;
 			remoteInfo = WorkoutRandomizer;
 		};
+		CAD959E92F413F0600AA3617 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2DF9E2702EF58FD200331F12 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CAD959E02F413F0500AA3617;
+			remoteInfo = "WorkoutRandomizer Watch App Watch App";
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		CAD959EF2F413F0600AA3617 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				CAD959EB2F413F0600AA3617 /* WorkoutRandomizer for Watch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		2DF9E2782EF58FD200331F12 /* WorkoutRandomizer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WorkoutRandomizer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2DF9E2852EF58FD500331F12 /* WorkoutRandomizerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WorkoutRandomizerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2DF9E28F2EF58FD500331F12 /* WorkoutRandomizerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WorkoutRandomizerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CAD959E12F413F0500AA3617 /* WorkoutRandomizer for Watch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "WorkoutRandomizer for Watch.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		CAD959F02F413F5000AA3617 /* Exceptions for "WorkoutRandomizer for Watch" folder in "WorkoutRandomizer" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				WorkoutConnectivityManager.swift,
+				WorkoutWatchView.swift,
+			);
+			target = 2DF9E2772EF58FD200331F12 /* WorkoutRandomizer */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		2DF9E27A2EF58FD200331F12 /* WorkoutRandomizer */ = {
@@ -43,6 +80,14 @@
 		2DF9E2922EF58FD500331F12 /* WorkoutRandomizerUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = WorkoutRandomizerUITests;
+			sourceTree = "<group>";
+		};
+		CAD959E22F413F0500AA3617 /* WorkoutRandomizer for Watch */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				CAD959F02F413F5000AA3617 /* Exceptions for "WorkoutRandomizer for Watch" folder in "WorkoutRandomizer" target */,
+			);
+			path = "WorkoutRandomizer for Watch";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -69,6 +114,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CAD959DE2F413F0500AA3617 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -78,6 +130,7 @@
 				2DF9E27A2EF58FD200331F12 /* WorkoutRandomizer */,
 				2DF9E2882EF58FD500331F12 /* WorkoutRandomizerTests */,
 				2DF9E2922EF58FD500331F12 /* WorkoutRandomizerUITests */,
+				CAD959E22F413F0500AA3617 /* WorkoutRandomizer for Watch */,
 				2DF9E2792EF58FD200331F12 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,6 +141,7 @@
 				2DF9E2782EF58FD200331F12 /* WorkoutRandomizer.app */,
 				2DF9E2852EF58FD500331F12 /* WorkoutRandomizerTests.xctest */,
 				2DF9E28F2EF58FD500331F12 /* WorkoutRandomizerUITests.xctest */,
+				CAD959E12F413F0500AA3617 /* WorkoutRandomizer for Watch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -102,10 +156,12 @@
 				2DF9E2742EF58FD200331F12 /* Sources */,
 				2DF9E2752EF58FD200331F12 /* Frameworks */,
 				2DF9E2762EF58FD200331F12 /* Resources */,
+				CAD959EF2F413F0600AA3617 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				CAD959EA2F413F0600AA3617 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				2DF9E27A2EF58FD200331F12 /* WorkoutRandomizer */,
@@ -163,6 +219,28 @@
 			productReference = 2DF9E28F2EF58FD500331F12 /* WorkoutRandomizerUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		CAD959E02F413F0500AA3617 /* WorkoutRandomizer for Watch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CAD959EC2F413F0600AA3617 /* Build configuration list for PBXNativeTarget "WorkoutRandomizer for Watch" */;
+			buildPhases = (
+				CAD959DD2F413F0500AA3617 /* Sources */,
+				CAD959DE2F413F0500AA3617 /* Frameworks */,
+				CAD959DF2F413F0500AA3617 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				CAD959E22F413F0500AA3617 /* WorkoutRandomizer for Watch */,
+			);
+			name = "WorkoutRandomizer for Watch";
+			packageProductDependencies = (
+			);
+			productName = "WorkoutRandomizer Watch App Watch App";
+			productReference = CAD959E12F413F0500AA3617 /* WorkoutRandomizer for Watch.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -170,7 +248,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2620;
+				LastSwiftUpdateCheck = 2630;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					2DF9E2772EF58FD200331F12 = {
@@ -183,6 +261,9 @@
 					2DF9E28E2EF58FD500331F12 = {
 						CreatedOnToolsVersion = 26.2;
 						TestTargetID = 2DF9E2772EF58FD200331F12;
+					};
+					CAD959E02F413F0500AA3617 = {
+						CreatedOnToolsVersion = 26.3;
 					};
 				};
 			};
@@ -203,6 +284,7 @@
 				2DF9E2772EF58FD200331F12 /* WorkoutRandomizer */,
 				2DF9E2842EF58FD500331F12 /* WorkoutRandomizerTests */,
 				2DF9E28E2EF58FD500331F12 /* WorkoutRandomizerUITests */,
+				CAD959E02F413F0500AA3617 /* WorkoutRandomizer for Watch */,
 			);
 		};
 /* End PBXProject section */
@@ -223,6 +305,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		2DF9E28D2EF58FD500331F12 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CAD959DF2F413F0500AA3617 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -253,6 +342,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CAD959DD2F413F0500AA3617 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -265,6 +361,11 @@
 			isa = PBXTargetDependency;
 			target = 2DF9E2772EF58FD200331F12 /* WorkoutRandomizer */;
 			targetProxy = 2DF9E2902EF58FD500331F12 /* PBXContainerItemProxy */;
+		};
+		CAD959EA2F413F0600AA3617 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CAD959E02F413F0500AA3617 /* WorkoutRandomizer for Watch */;
+			targetProxy = CAD959E92F413F0600AA3617 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -395,7 +496,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = C7ZFPH2CB5;
 				ENABLE_APP_SANDBOX = YES;
@@ -452,7 +553,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = C7ZFPH2CB5;
 				ENABLE_APP_SANDBOX = YES;
@@ -609,6 +710,73 @@
 			};
 			name = Release;
 		};
+		CAD959ED2F413F0600AA3617 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C7ZFPH2CB5;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "WorkoutRandomizer Watch App";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = rocks.scruggsfam.productions.WorkoutRandomizer;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = rocks.scruggsfam.productions.WorkoutRandomizer.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Debug;
+		};
+		CAD959EE2F413F0600AA3617 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C7ZFPH2CB5;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "WorkoutRandomizer Watch App";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = rocks.scruggsfam.productions.WorkoutRandomizer;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = rocks.scruggsfam.productions.WorkoutRandomizer.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -644,6 +812,15 @@
 			buildConfigurations = (
 				2DF9E2A02EF58FD500331F12 /* Debug */,
 				2DF9E2A12EF58FD500331F12 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CAD959EC2F413F0600AA3617 /* Build configuration list for PBXNativeTarget "WorkoutRandomizer for Watch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CAD959ED2F413F0600AA3617 /* Debug */,
+				CAD959EE2F413F0600AA3617 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

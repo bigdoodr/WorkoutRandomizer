@@ -236,7 +236,11 @@ struct ExercisesView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    #if os(macOS)
                     .frame(minWidth: 640, minHeight: 360)
+                    #else
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    #endif
                 } else if let player = sheetPlayer {
                     #if os(macOS)
                     AVPlayerLayerView(player: player)
@@ -245,7 +249,7 @@ struct ExercisesView: View {
                     #else
                     VideoPlayer(player: player)
                         .aspectRatio(16/9, contentMode: .fit)
-                        .frame(minWidth: 640, minHeight: 360)
+                        .frame(maxWidth: .infinity)
                         .onDisappear { player.pause() }
                     #endif
                 }

@@ -77,6 +77,14 @@ struct WorkoutGeneratorApp: App {
         }
     #endif
 #endif
+#if os(iOS)
+        // Nudge the WatchConnectivity session shortly after launch to encourage reachability
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let wc = WorkoutConnectivityManager.shared
+            // Use a lightweight control message to try to wake the watch app if possible
+            wc.sendControlMessage(.workoutPaused)
+        }
+#endif
     }
     
     var body: some Scene {
@@ -871,6 +879,7 @@ struct WorkoutPlayerView: View {
     @State private var playerNode: AVAudioPlayerNode?
 #endif
     @StateObject private var videoManager = VideoManager.shared
+    @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
     @State private var avPlayer: AVPlayer? = nil
     @State private var playerEndObserver: Any? = nil
     @Environment(\.dismiss) private var dismiss
@@ -1076,18 +1085,28 @@ struct WorkoutPlayerView: View {
             avPlayer = nil
             return
         }
-        let playerItem = AVPlayerItem(url: url)
-        let player = avPlayer ?? AVPlayer()
-        player.isMuted = true
-        player.replaceCurrentItem(with: playerItem)
-        player.actionAtItemEnd = .none
-        // Loop when the item ends
-        playerEndObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: .main) { _ in
-            player.seek(to: .zero)
-            player.play()
+
+        // Create the AVPlayerItem off the main thread to avoid blocking gestures/UI
+        DispatchQueue.global(qos: .userInitiated).async {
+            let item = AVPlayerItem(url: url)
+
+            // Hop back to main to bind to the player and UI-related observers
+            DispatchQueue.main.async {
+                let player = self.avPlayer ?? AVPlayer()
+                player.isMuted = true
+                player.replaceCurrentItem(with: item)
+                player.actionAtItemEnd = .none
+
+                // Loop when the item ends
+                self.playerEndObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
+                    player.seek(to: .zero)
+                    player.play()
+                }
+
+                self.avPlayer = player
+                if autoplay { player.play() }
+            }
         }
-        avPlayer = player
-        if autoplay { player.play() }
     }
     
     private func setupAudio() {
@@ -1118,6 +1137,7 @@ struct WorkoutPlayerView: View {
     
     private func playFeedback(_ event: FeedbackEvent) {
         triggerHaptic(for: event)
+        sendFeedbackToWatch(event)
 #if os(macOS)
         if enableSound_macOS {
             // Use system beep variations by repeating quickly to differentiate
@@ -1140,94 +1160,105 @@ struct WorkoutPlayerView: View {
 #if canImport(AVFoundation)
     #if os(iOS) || os(tvOS) || os(visionOS)
         guard enableSound_iOS_tv_vision else { return }
-        // Ensure session and engine are ready
-        do {
+        // Ensure session and engine are ready (configure off-main to avoid blocking gesture)
+        DispatchQueue.global(qos: .utility).async {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try audioSession.setActive(true, options: [])
-        } catch { }
+            _ = try? audioSession.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            _ = try? audioSession.setActive(true, options: [])
+        }
 
         if audioEngine == nil || playerNode == nil { setupAudio() }
         guard let engine = audioEngine else { return }
-        let node: AVAudioPlayerNode
-        if let existing = playerNode { node = existing } else {
-            let newNode = AVAudioPlayerNode()
-            engine.attach(newNode)
-            engine.connect(newNode, to: engine.mainMixerNode, format: nil)
-            playerNode = newNode
-            node = newNode
-        }
-        if !engine.isRunning { try? engine.start() }
-        engine.mainMixerNode.outputVolume = 1.0
-        engine.mainMixerNode.volume = 1.0
 
-        let mixerFormat = engine.mainMixerNode.outputFormat(forBus: 0)
-        let sampleRate = mixerFormat.sampleRate
+        // Offload buffer synthesis and scheduling off the main thread
+        DispatchQueue.global(qos: .userInitiated).async {
+            let node: AVAudioPlayerNode
+            if let existing = self.playerNode { node = existing } else {
+                let newNode = AVAudioPlayerNode()
+                engine.attach(newNode)
+                engine.connect(newNode, to: engine.mainMixerNode, format: nil)
+                self.playerNode = newNode
+                node = newNode
+            }
 
-        func makeBuffer(freq: Double, dur: Double, bright: Bool = false, gain: Double = 0.8) -> AVAudioPCMBuffer? {
-            let frames = AVAudioFrameCount(sampleRate * dur)
-            guard let buf = AVAudioPCMBuffer(pcmFormat: mixerFormat, frameCapacity: frames) else { return nil }
-            buf.frameLength = frames
+            if !engine.isRunning { try? engine.start() }
+            engine.mainMixerNode.outputVolume = 1.0
+            engine.mainMixerNode.volume = 1.0
 
-            // Simple ADSR envelope (attack/decay only for short bleeps)
-            let attack = Int(0.005 * sampleRate) // 5ms
-            let decay = Int(0.06 * sampleRate)   // 60ms
-            let sustainLevel = 0.7
-            let total = Int(frames)
+            let mixerFormat = engine.mainMixerNode.outputFormat(forBus: 0)
+            let sampleRate = mixerFormat.sampleRate
 
-            let channelCount = Int(mixerFormat.channelCount)
-            for ch in 0..<channelCount {
-                if let data = buf.floatChannelData?[ch] {
-                    for i in 0..<total {
-                        // Waveform: sine (warm) or square-ish (bright)
-                        let t = Double(i) / sampleRate
-                        let phase = 2.0 * Double.pi * freq * t
-                        let raw: Double
-                        if bright {
-                            // Square-like using sign(sin) with mild low-pass blend
-                            let s = sin(phase)
-                            raw = 0.8 * (s >= 0 ? 1.0 : -1.0) + 0.2 * s
-                        } else {
-                            raw = sin(phase)
+            func makeBuffer(freq: Double, dur: Double, bright: Bool = false, gain: Double = 0.8) -> AVAudioPCMBuffer? {
+                let frames = AVAudioFrameCount(sampleRate * dur)
+                guard let buf = AVAudioPCMBuffer(pcmFormat: mixerFormat, frameCapacity: frames) else { return nil }
+                buf.frameLength = frames
+
+                let attack = Int(0.005 * sampleRate)
+                let decay = Int(0.06 * sampleRate)
+                let sustainLevel = 0.7
+                let total = Int(frames)
+
+                let channelCount = Int(mixerFormat.channelCount)
+                for ch in 0..<channelCount {
+                    if let data = buf.floatChannelData?[ch] {
+                        for i in 0..<total {
+                            let t = Double(i) / sampleRate
+                            let phase = 2.0 * Double.pi * freq * t
+                            let raw: Double
+                            if bright {
+                                let s = sin(phase)
+                                raw = 0.8 * (s >= 0 ? 1.0 : -1.0) + 0.2 * s
+                            } else {
+                                raw = sin(phase)
+                            }
+                            let amp: Double
+                            if i < attack {
+                                amp = Double(i) / Double(max(1, attack))
+                            } else if i < attack + decay {
+                                let d = Double(i - attack) / Double(max(1, decay))
+                                amp = 1.0 - (1.0 - sustainLevel) * d
+                            } else {
+                                amp = sustainLevel
+                            }
+                            data[i] = Float(raw * amp * gain)
                         }
-                        // Envelope
-                        let amp: Double
-                        if i < attack {
-                            amp = Double(i) / Double(max(1, attack))
-                        } else if i < attack + decay {
-                            let d = Double(i - attack) / Double(max(1, decay))
-                            amp = 1.0 - (1.0 - sustainLevel) * d
-                        } else {
-                            amp = sustainLevel
-                        }
-                        data[i] = Float(raw * amp * gain)
                     }
                 }
+                return buf
             }
-            return buf
-        }
 
-        let (frequency, duration, bright, gain): (Double, Double, Bool, Double)
-        switch event {
-        case .start:    (frequency, duration, bright, gain) = (880, 0.12, false, 0.9)     // A5 short
-        case .warning:  (frequency, duration, bright, gain) = (1400, 0.10, true, 1.0)     // brighter chirp
-        case .end:      (frequency, duration, bright, gain) = (523.25, 0.22, false, 0.95) // C5
-        case .complete: (frequency, duration, bright, gain) = (659.25, 0.18, true, 1.0)   // E5
-        }
+            let (frequency, duration, bright, gain): (Double, Double, Bool, Double)
+            switch event {
+            case .start:    (frequency, duration, bright, gain) = (880, 0.12, false, 0.9)
+            case .warning:  (frequency, duration, bright, gain) = (1400, 0.10, true, 1.0)
+            case .end:      (frequency, duration, bright, gain) = (523.25, 0.22, false, 0.95)
+            case .complete: (frequency, duration, bright, gain) = (659.25, 0.18, true, 1.0)
+            }
 
-        if event == .complete {
-            let freqs = [frequency, frequency * 1.2, frequency * 1.5]
-            for f in freqs {
-                if let buf = makeBuffer(freq: f, dur: 0.16, bright: true, gain: 1.0) {
-                    node.scheduleBuffer(buf, completionHandler: nil)
+            // Prepare buffers off-main
+            var buffers: [AVAudioPCMBuffer] = []
+            switch event {
+            case .complete:
+                let freqs = [frequency, frequency * 1.2, frequency * 1.5]
+                for f in freqs {
+                    if let buf = makeBuffer(freq: f, dur: 0.16, bright: true, gain: 1.0) {
+                        buffers.append(buf)
+                    }
+                }
+            default:
+                if let buf = makeBuffer(freq: frequency, dur: duration, bright: bright, gain: gain) {
+                    buffers.append(buf)
                 }
             }
-        } else {
-            if let buf = makeBuffer(freq: frequency, dur: duration, bright: bright, gain: gain) {
-                node.scheduleBuffer(buf, completionHandler: nil)
+
+            // Schedule and play on main to interact with AVAudioEngine safely
+            DispatchQueue.main.async {
+                for buf in buffers {
+                    node.scheduleBuffer(buf, completionHandler: nil)
+                }
+                if !node.isPlaying { node.play() }
             }
         }
-        if !node.isPlaying { node.play() }
     #endif
 #endif
     }
@@ -1256,11 +1287,46 @@ struct WorkoutPlayerView: View {
 #endif
     }
     
+    private func sendWorkoutStateToWatch() {
+        #if os(iOS)
+        let state = WorkoutState(
+            currentExerciseName: currentExercise?.name ?? "Complete",
+            currentIndex: currentIndex,
+            totalExercises: routine.count,
+            timeRemaining: timeRemaining,
+            isRest: isRest,
+            nextExerciseName: currentIndex + 1 < routine.count ? routine[currentIndex + 1].name : nil,
+            isPlaying: isPlaying,
+            isPaused: isPaused
+        )
+        connectivityManager.sendWorkoutState(state)
+        #endif
+    }
+    
+    private func sendFeedbackToWatch(_ event: FeedbackEvent) {
+        #if os(iOS)
+        let feedbackType: FeedbackType
+        switch event {
+        case .start: feedbackType = .start
+        case .warning: feedbackType = .warning
+        case .end: feedbackType = .end
+        case .complete: feedbackType = .complete
+        }
+        connectivityManager.sendFeedbackEvent(feedbackType)
+        #endif
+    }
+    
     private func startWorkout() {
+        // Flip minimal UI state immediately to finish the gesture quickly
         isPlaying = true
-        playFeedback(.start)
-        prepareVideoForCurrentExercise(autoplay: true)
-        startTimer()
+
+        // Defer heavier work to the next run loop to avoid blocking the gesture handler
+        DispatchQueue.main.async {
+            self.playFeedback(.start)
+            self.prepareVideoForCurrentExercise(autoplay: true)
+            self.sendWorkoutStateToWatch()
+            self.startTimer()
+        }
     }
     
     private func startTimer() {
@@ -1269,6 +1335,11 @@ struct WorkoutPlayerView: View {
             guard !isPaused else { return }
             
             timeRemaining -= 1
+            
+            // Send timer update to watch every second
+            #if os(iOS)
+            connectivityManager.sendTimerUpdate(timeRemaining: timeRemaining)
+            #endif
             
             if timeRemaining == 3 {
                 playFeedback(.warning) // Warning beep
@@ -1287,6 +1358,7 @@ struct WorkoutPlayerView: View {
         if currentIndex >= routine.count {
             // Workout complete
             playFeedback(.complete)
+            sendWorkoutStateToWatch()
             // Delay stopping the workout to allow completion sound to finish playing
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 self.stopWorkout()
@@ -1298,11 +1370,13 @@ struct WorkoutPlayerView: View {
         timeRemaining = exercise.name == "Rest" ? restDuration : exerciseDuration
         prepareVideoForCurrentExercise(autoplay: true)
         playFeedback(.start) // Start beep for next exercise
+        sendWorkoutStateToWatch()
     }
     
     private func togglePause() {
         isPaused.toggle()
         playFeedback(.warning)
+        sendWorkoutStateToWatch()
         if isPaused { avPlayer?.pause() } else { avPlayer?.play() }
     }
     
@@ -1333,4 +1407,3 @@ fileprivate extension Array where Element: Hashable {
         return filter { seen.insert($0).inserted }
     }
 }
-
