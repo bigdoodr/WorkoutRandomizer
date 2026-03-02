@@ -8,6 +8,7 @@ import WatchKit
 
 struct WorkoutWatchView: View {
     @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
+    @StateObject private var sessionManager = WorkoutSessionManager.shared
     
     var workoutState: WorkoutState? {
         connectivityManager.workoutState
@@ -34,6 +35,22 @@ struct WorkoutWatchView: View {
                 Text("\(state.currentIndex + 1) of \(state.totalExercises)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                
+                // HealthKit metrics
+                if sessionManager.isWorkoutActive {
+                    HStack(spacing: 12) {
+                        if sessionManager.heartRate > 0 {
+                            Label("\(Int(sessionManager.heartRate))", systemImage: "heart.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
+                        if sessionManager.activeCalories > 0 {
+                            Label("\(Int(sessionManager.activeCalories))", systemImage: "flame.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
                 
                 // Next Exercise
                 if let nextName = state.nextExerciseName {

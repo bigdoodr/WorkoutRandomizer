@@ -1,13 +1,8 @@
 // WorkoutConnectivityManager.swift
 // Provides a minimal cross-platform implementation used by WorkoutRandomizer
 
+import Combine
 import Foundation
-
-#if os(iOS)
-import WatchConnectivity
-import HealthKit
-
-// MARK: - Messages/Models used by iOS watch connectivity
 
 public enum FeedbackType: String, Codable {
     case start
@@ -32,6 +27,10 @@ public struct WorkoutState: Codable {
     public let isPlaying: Bool
     public let isPaused: Bool
 }
+
+#if os(iOS)
+import WatchConnectivity
+import HealthKit
 
 // MARK: - iOS Implementation
 
@@ -89,19 +88,6 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
 
 // MARK: - Non-iOS shim so other platforms compile
 
-public enum FeedbackType: String, Codable { case start, warning, end, complete }
-public enum ControlMessage: String, Codable { case workoutPaused, workoutResumed, workoutStopped }
-public struct WorkoutState: Codable {
-    public let currentExerciseName: String
-    public let currentIndex: Int
-    public let totalExercises: Int
-    public let timeRemaining: Int
-    public let isRest: Bool
-    public let nextExerciseName: String?
-    public let isPlaying: Bool
-    public let isPaused: Bool
-}
-
 final class WorkoutConnectivityManager: NSObject, ObservableObject {
     static let shared = WorkoutConnectivityManager()
     private override init() {}
@@ -113,3 +99,4 @@ final class WorkoutConnectivityManager: NSObject, ObservableObject {
 }
 
 #endif
+

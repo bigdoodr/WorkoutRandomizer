@@ -6,6 +6,9 @@ import AVFoundation
 #if canImport(AVKit)
 import AVKit
 #endif
+#if canImport(HealthKit)
+import HealthKit
+#endif
 
 #if os(macOS)
 import AppKit
@@ -78,12 +81,8 @@ struct WorkoutGeneratorApp: App {
     #endif
 #endif
 #if os(iOS)
-        // Nudge the WatchConnectivity session shortly after launch to encourage reachability
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let wc = WorkoutConnectivityManager.shared
-            // Use a lightweight control message to try to wake the watch app if possible
-            wc.sendControlMessage(.workoutPaused)
-        }
+        // Activate WatchConnectivity session early so it's ready when needed
+        _ = WorkoutConnectivityManager.shared
 #endif
     }
     
@@ -1325,8 +1324,26 @@ struct WorkoutPlayerView: View {
             self.playFeedback(.start)
             self.prepareVideoForCurrentExercise(autoplay: true)
             self.sendWorkoutStateToWatch()
+            self.launchWatchWorkoutSession()
             self.startTimer()
         }
+    }
+    
+    private func launchWatchWorkoutSession() {
+        #if os(iOS)
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        let store = HKHealthStore()
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = .highIntensityIntervalTraining
+        configuration.locationType = .indoor
+        store.startWatchApp(with: configuration) { success, error in
+            if let error = error {
+                print("Failed to launch watch app: \(error.localizedDescription)")
+            } else if success {
+                print("Watch app launched for workout session")
+            }
+        }
+        #endif
     }
     
     private func startTimer() {
@@ -1377,6 +1394,9 @@ struct WorkoutPlayerView: View {
         isPaused.toggle()
         playFeedback(.warning)
         sendWorkoutStateToWatch()
+        #if os(iOS)
+        connectivityManager.sendControlMessage(isPaused ? .workoutPaused : .workoutResumed)
+        #endif
         if isPaused { avPlayer?.pause() } else { avPlayer?.play() }
     }
     
@@ -1398,6 +1418,9 @@ struct WorkoutPlayerView: View {
 #endif
         timer?.invalidate()
         timer = nil
+        #if os(iOS)
+        connectivityManager.sendControlMessage(.workoutStopped)
+        #endif
     }
 }
 // MARK: - Array Unique Extension

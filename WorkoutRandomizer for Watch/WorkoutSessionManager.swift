@@ -3,6 +3,7 @@
 
 #if os(watchOS)
 import Foundation
+import Combine
 import HealthKit
 import WatchKit
 
