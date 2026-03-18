@@ -37,6 +37,8 @@ class WorkoutConnectivityManager: NSObject, ObservableObject {
 
     @Published var workoutState: WorkoutState?
     @Published var isWatchConnected = false
+    /// Set to true when a new workout state arrives and fitness tracking hasn't started yet
+    @Published var shouldPromptToStartTracking = false
 
     private let session: WCSession? = WCSession.isSupported() ? WCSession.default : nil
 
@@ -57,6 +59,30 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
         }
         if let error {
             print("WCSession activation failed: \(error.localizedDescription)")
+        }
+        // Check for any pending applicationContext that was set while the watch was asleep
+        if activationState == .activated {
+            let context = session.receivedApplicationContext
+            if let data = context["workoutStatePayload"] as? Data {
+                DispatchQueue.main.async {
+                    self.decodeAndApplyState(data)
+                }
+            }
+        }
+    }
+
+    // MARK: Receive application context (delivered on wake / app launch)
+
+    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String : Any]) {
+        if let data = applicationContext["workoutStatePayload"] as? Data {
+            DispatchQueue.main.async {
+                self.decodeAndApplyState(data)
+            }
+        } else {
+            // Empty context means workout was stopped on the phone
+            DispatchQueue.main.async {
+                self.workoutState = nil
+            }
         }
     }
 
@@ -105,7 +131,13 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
     private func decodeAndApplyState(_ data: Data) {
         do {
             let state = try JSONDecoder().decode(WorkoutState.self, from: data)
+            let wasNil = self.workoutState == nil
             self.workoutState = state
+            // Prompt to start fitness tracking when a workout first appears
+            // and the HealthKit session isn't already running
+            if wasNil && state.isPlaying && !WorkoutSessionManager.shared.isWorkoutActive {
+                self.shouldPromptToStartTracking = true
+            }
         } catch {
             print("Failed to decode workout state: \(error.localizedDescription)")
         }

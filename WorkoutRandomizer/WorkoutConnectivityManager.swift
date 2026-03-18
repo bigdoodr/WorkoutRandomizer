@@ -51,6 +51,8 @@ final class WorkoutConnectivityManager: NSObject, ObservableObject {
             let data = try JSONEncoder().encode(state)
             let message: [String: Any] = ["type": "workoutState", "payload": data]
             session.sendMessage(message, replyHandler: nil, errorHandler: nil)
+            // Also persist via applicationContext so the watch gets the latest state on wake
+            try session.updateApplicationContext(["workoutStatePayload": data])
         } catch {
             // Swallow encoding errors for now
         }
@@ -72,6 +74,10 @@ final class WorkoutConnectivityManager: NSObject, ObservableObject {
         guard let session, session.isPaired, session.isWatchAppInstalled else { return }
         let message: [String: Any] = ["type": "control", "message": messageType.rawValue]
         session.sendMessage(message, replyHandler: nil, errorHandler: nil)
+        // Clear persisted context when workout ends so the watch doesn't restore stale state
+        if messageType == .workoutStopped {
+            try? session.updateApplicationContext([:])
+        }
     }
 }
 
