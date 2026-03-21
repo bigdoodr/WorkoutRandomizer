@@ -1,36 +1,14 @@
 // WorkoutConnectivityManager.swift (watchOS)
+// WorkoutConnectivityManager.swift (watchOS)
 // Receives WatchConnectivity messages from the iOS app and drives the Watch UI
 
+#if os(watchOS)
 import Combine
 import Foundation
 import WatchConnectivity
 import WatchKit
 
-// MARK: - Shared types (must match the iOS definitions)
-
-enum FeedbackType: String, Codable {
-    case start
-    case warning
-    case end
-    case complete
-}
-
-enum ControlMessage: String, Codable {
-    case workoutPaused
-    case workoutResumed
-    case workoutStopped
-}
-
-struct WorkoutState: Codable {
-    let currentExerciseName: String
-    let currentIndex: Int
-    let totalExercises: Int
-    let timeRemaining: Int
-    let isRest: Bool
-    let nextExerciseName: String?
-    let isPlaying: Bool
-    let isPaused: Bool
-}
+// MARK: - watchOS-specific WorkoutConnectivityManager
 
 class WorkoutConnectivityManager: NSObject, ObservableObject {
     static let shared = WorkoutConnectivityManager()
@@ -192,3 +170,5 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
         }
     }
 }
+
+#endif

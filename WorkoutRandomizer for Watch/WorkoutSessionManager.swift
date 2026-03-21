@@ -6,6 +6,7 @@ import Foundation
 import Combine
 import HealthKit
 import WatchKit
+import WatchConnectivity
 
 class WorkoutSessionManager: NSObject, ObservableObject {
     static let shared = WorkoutSessionManager()
@@ -175,6 +176,9 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
                     default:
                         break
                     }
+                    
+                    // Send updated metrics to iPhone
+                    self.sendHealthMetricsToPhone()
                 }
             }
         }
@@ -182,6 +186,32 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
     
     func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {
         // Handle workout events if needed
+    }
+    
+    // MARK: - Send Health Metrics to iPhone
+    
+    private func sendHealthMetricsToPhone() {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.isReachable else { return }
+        
+        // Create metrics payload
+        let metrics: [String: Any] = [
+            "heartRate": heartRate,
+            "activeCalories": activeCalories,
+            "isWorkoutActive": isWorkoutActive
+        ]
+        
+        // Encode to data
+        do {
+            let data = try JSONSerialization.data(withJSONObject: metrics)
+            let message: [String: Any] = ["type": "healthMetrics", "payload": data]
+            session.sendMessage(message, replyHandler: nil) { error in
+                print("Failed to send health metrics to iPhone: \(error.localizedDescription)")
+            }
+        } catch {
+            print("Failed to encode health metrics: \(error.localizedDescription)")
+        }
     }
 }
 #endif

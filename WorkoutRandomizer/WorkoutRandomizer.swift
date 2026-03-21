@@ -973,6 +973,14 @@ struct WorkoutPlayerView: View {
                                 }
                             }
                         }
+                        
+                        // Health Metrics from Apple Watch (iOS only)
+                        #if os(iOS)
+                        if isPlaying && connectivityManager.isWatchConnected {
+                            HealthMetricsView(connectivityManager: connectivityManager)
+                                .padding(.top, 8)
+                        }
+                        #endif
 
                         Spacer(minLength: 0)
                     }
@@ -1355,7 +1363,10 @@ struct WorkoutPlayerView: View {
             
             // Send timer update to watch every second
             #if os(iOS)
-            connectivityManager.sendTimerUpdate(timeRemaining: timeRemaining)
+            let currentTime = timeRemaining
+            Task { @MainActor in
+                connectivityManager.sendTimerUpdate(timeRemaining: currentTime)
+            }
             #endif
             
             if timeRemaining == 3 {

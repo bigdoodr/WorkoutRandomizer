@@ -6,39 +6,7 @@ import Foundation
 import Combine
 import WatchConnectivity
 
-// MARK: - Shared types (must match the watchOS definitions)
-
-enum FeedbackType: String, Codable {
-    case start
-    case warning
-    case end
-    case complete
-}
-
-enum ControlMessage: String, Codable {
-    case workoutPaused
-    case workoutResumed
-    case workoutStopped
-}
-
-struct WorkoutState: Codable {
-    let currentExerciseName: String
-    let currentIndex: Int
-    let totalExercises: Int
-    let timeRemaining: Int
-    let isRest: Bool
-    let nextExerciseName: String?
-    let isPlaying: Bool
-    let isPaused: Bool
-}
-
-// MARK: - Health Metrics from Watch
-
-struct WatchHealthMetrics: Codable {
-    let heartRate: Double
-    let activeCalories: Double
-    let isWorkoutActive: Bool
-}
+// MARK: - iOS-specific WorkoutConnectivityManager
 
 @MainActor
 class WorkoutConnectivityManager: ObservableObject {

@@ -8,9 +8,10 @@
 
 #if os(iOS) && DEBUG
 import SwiftUI
+import WatchConnectivity
 
 struct HealthKitDebugView: View {
-    @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
+    @ObservedObject private var connectivityManager = WorkoutConnectivityManager.shared
     @State private var showingTestMetrics = false
     
     var body: some View {

@@ -5,6 +5,9 @@
       location = "self:">
    </FileRef>
    <FileRef
-      location = "group:AVPlayerLayerView.swift">
+      location = "group:WorkoutConnectivityManager+iOS.swift">
+   </FileRef>
+   <FileRef
+      location = "group:WorkoutConnectivityManager+iOS 2.swift">
    </FileRef>
 </Workspace>

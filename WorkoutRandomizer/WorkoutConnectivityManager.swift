@@ -28,66 +28,153 @@ public struct WorkoutState: Codable {
     public let isPaused: Bool
 }
 
+// Health metrics sent from Watch to iPhone
+struct WatchHealthMetrics: Codable {
+    let heartRate: Double
+    let activeCalories: Double
+    let isWorkoutActive: Bool
+}
+
 #if os(iOS)
+
+// MARK: - iOS-specific WorkoutConnectivityManager
+
 import WatchConnectivity
-import HealthKit
 
-// MARK: - iOS Implementation
-
-final class WorkoutConnectivityManager: NSObject, ObservableObject {
+@MainActor
+class WorkoutConnectivityManager: ObservableObject {
     static let shared = WorkoutConnectivityManager()
+
+    @Published var isWatchConnected = false
+    @Published var heartRate: Double = 0
+    @Published var activeCalories: Double = 0
+    @Published var isWatchWorkoutActive = false
 
     private let session: WCSession? = WCSession.isSupported() ? WCSession.default : nil
 
-    private override init() {
-        super.init()
-        session?.delegate = self
-        session?.activate()
+    private init() {
+        if let session = session {
+            session.delegate = WatchConnectivityDelegate.shared
+            session.activate()
+        }
     }
 
+    // MARK: - Send workout state to Watch
+
     func sendWorkoutState(_ state: WorkoutState) {
-        guard let session, session.isPaired, session.isWatchAppInstalled else { return }
+        guard let session = session, session.isReachable else {
+            sendWorkoutStateViaContext(state)
+            return
+        }
+
         do {
             let data = try JSONEncoder().encode(state)
             let message: [String: Any] = ["type": "workoutState", "payload": data]
-            session.sendMessage(message, replyHandler: nil, errorHandler: nil)
-            // Also persist via applicationContext so the watch gets the latest state on wake
-            try session.updateApplicationContext(["workoutStatePayload": data])
+            session.sendMessage(message, replyHandler: nil) { error in
+                print("Failed to send workout state: \(error.localizedDescription)")
+                self.sendWorkoutStateViaContext(state)
+            }
         } catch {
-            // Swallow encoding errors for now
+            print("Failed to encode workout state: \(error.localizedDescription)")
+        }
+    }
+
+    private func sendWorkoutStateViaContext(_ state: WorkoutState) {
+        guard let session = session else { return }
+        do {
+            let data = try JSONEncoder().encode(state)
+            let context: [String: Any] = ["workoutStatePayload": data]
+            try session.updateApplicationContext(context)
+        } catch {
+            print("Failed to send workout state via context: \(error.localizedDescription)")
         }
     }
 
     func sendTimerUpdate(timeRemaining: Int) {
-        guard let session, session.isPaired, session.isWatchAppInstalled else { return }
+        guard let session = session, session.isReachable else { return }
         let message: [String: Any] = ["type": "timerUpdate", "timeRemaining": timeRemaining]
-        session.sendMessage(message, replyHandler: nil, errorHandler: nil)
+        session.sendMessage(message, replyHandler: nil)
     }
 
     func sendFeedbackEvent(_ event: FeedbackType) {
-        guard let session, session.isPaired, session.isWatchAppInstalled else { return }
+        guard let session = session, session.isReachable else { return }
         let message: [String: Any] = ["type": "feedback", "event": event.rawValue]
-        session.sendMessage(message, replyHandler: nil, errorHandler: nil)
+        session.sendMessage(message, replyHandler: nil)
     }
 
-    func sendControlMessage(_ messageType: ControlMessage) {
-        guard let session, session.isPaired, session.isWatchAppInstalled else { return }
-        let message: [String: Any] = ["type": "control", "message": messageType.rawValue]
-        session.sendMessage(message, replyHandler: nil, errorHandler: nil)
-        // Clear persisted context when workout ends so the watch doesn't restore stale state
-        if messageType == .workoutStopped {
-            try? session.updateApplicationContext([:])
+    func sendControlMessage(_ control: ControlMessage) {
+        guard let session = session else { return }
+
+        if control == .workoutStopped {
+            do {
+                try session.updateApplicationContext([:])
+            } catch {
+                print("Failed to clear application context: \(error.localizedDescription)")
+            }
+        }
+
+        guard session.isReachable else { return }
+        let message: [String: Any] = ["type": "control", "message": control.rawValue]
+        session.sendMessage(message, replyHandler: nil)
+    }
+
+    // MARK: - Receive health metrics from Watch
+
+    nonisolated func receiveHealthMetrics(_ metrics: WatchHealthMetrics) {
+        Task { @MainActor in
+            self.heartRate = metrics.heartRate
+            self.activeCalories = metrics.activeCalories
+            self.isWatchWorkoutActive = metrics.isWorkoutActive
         }
     }
 }
 
-extension WorkoutConnectivityManager: WCSessionDelegate {
+// MARK: - WCSessionDelegate (separate class to handle nonisolated callbacks)
+
+private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
+    static let shared = WatchConnectivityDelegate()
+
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
-        // No-op
+        Task { @MainActor in
+            WorkoutConnectivityManager.shared.isWatchConnected = (activationState == .activated)
+        }
+        if let error {
+            print("WCSession activation failed: \(error.localizedDescription)")
+        }
     }
 
-    func sessionDidBecomeInactive(_ session: WCSession) { }
-    func sessionDidDeactivate(_ session: WCSession) { session.activate() }
+    func sessionDidBecomeInactive(_ session: WCSession) {
+        Task { @MainActor in
+            WorkoutConnectivityManager.shared.isWatchConnected = false
+        }
+    }
+
+    func sessionDidDeactivate(_ session: WCSession) {
+        Task { @MainActor in
+            WorkoutConnectivityManager.shared.isWatchConnected = false
+        }
+        session.activate()
+    }
+
+    // MARK: Receive messages from Watch
+
+    func session(_ session: WCSession, didReceiveMessage message: [String : Any]) {
+        guard let type = message["type"] as? String else { return }
+
+        switch type {
+        case "healthMetrics":
+            if let data = message["payload"] as? Data {
+                do {
+                    let metrics = try JSONDecoder().decode(WatchHealthMetrics.self, from: data)
+                    WorkoutConnectivityManager.shared.receiveHealthMetrics(metrics)
+                } catch {
+                    print("Failed to decode health metrics: \(error.localizedDescription)")
+                }
+            }
+        default:
+            break
+        }
+    }
 }
 
 #else
