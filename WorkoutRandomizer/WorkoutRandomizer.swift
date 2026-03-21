@@ -644,6 +644,12 @@ struct WorkoutGeneratorView: View {
             switch result {
             case .success(let urls):
                 guard let url = urls.first else { return }
+                let accessing = url.startAccessingSecurityScopedResource()
+                defer {
+                    if accessing {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
                 do {
                     let data = try Data(contentsOf: url)
                     let exercises = try JSONDecoder().decode([ExportableExercise].self, from: data)
@@ -826,6 +832,7 @@ struct WorkoutGeneratorView: View {
     
     private func importWorkout(from document: WorkoutDocument) {
         var importedRoutine: [Exercise] = []
+        var didSetDurations = false
         
         for exportableExercise in document.exercises {
             // Try to find matching exercise in our database
@@ -845,12 +852,13 @@ struct WorkoutGeneratorView: View {
             let exercise = foundExercise ?? Exercise(name: exportableExercise.name, videoPath: nil)
             importedRoutine.append(exercise)
             
-            // Update durations from imported data
-            if exportableExercise.isTimeBased {
+            // Update durations from the first non-rest exercise only
+            if !didSetDurations && exportableExercise.isTimeBased && exportableExercise.name != "Rest" {
                 exerciseDuration = exportableExercise.exerciseDuration
                 if exportableExercise.restDuration > 0 {
                     restDuration = exportableExercise.restDuration
                 }
+                didSetDurations = true
             }
         }
         
