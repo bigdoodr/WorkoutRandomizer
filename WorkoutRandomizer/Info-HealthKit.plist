@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- HealthKit Privacy Descriptions -->
+	<key>NSHealthShareUsageDescription</key>
+	<string>This app needs access to your health data to display workout metrics during your exercise routines.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>This app needs to save your workout data to HealthKit to track your fitness progress.</string>
+	
+	<!-- Watch Connectivity is enabled by default, but you can add this for clarity -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+</dict>
+</plist>
