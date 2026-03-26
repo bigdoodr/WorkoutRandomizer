@@ -18,66 +18,12 @@ final class VideoManager: ObservableObject {
     @MainActor static let shared = VideoManager()
     private init() {}
     
-    // Canonical mapping of exercise identifiers to relative video paths
-    // Key examples could be exercise names or IDs used in ExercisesView/WorkoutRandomizer
-    // Update/add keys to match your app's data.
-    // Relative paths should be rooted at the site root (e.g., "/resources/squats.mp4").
+    // Video paths are now derived from the ExerciseCatalog (loaded from remote JSON / bundled fallback).
+    // No need to maintain a separate hardcoded dictionary.
     @MainActor
-    let videoPaths: [String: String] = [
-        // Chest
-        "Push-Ups": "/resources/pushupsAngle2.mp4",
-        "One-Legged Skier Push-Ups": "/resources/onelegskierpushups.mp4",
-        // Legs
-        "Squats": "/resources/squats.mp4",
-        "3-Way Lunges": "/resources/3wayLungesAngle2.mp4",
-        "Alternating Split Squats": "/resources/splitSquats.mp4",
-        "Frog Hops": "/resources/frogHops.mp4",
-        "Squat Jumps": "/resources/squatJumps.mp4",
-        "180° Squat Jumps": "/resources/180JumpSquats.mp4",
-        "Ninja Tuck Jumps": "/resources/ninjaTuckJumps.mp4",
-        "Prisoner Squat Jumps": "/resources/prisonerSquatJumps.mp4",
-        "3-Point Alternating Hops": "/resources/3pointAltHops.mp4",
-        "Prisoner Ninja Tuck Jumps": "/resources/prisonerNinjaTuckJumps.mp4",
-        "Triple Skyfalls": "/resources/3xskyfalls.mp4",
-        // Legs, No Cardio
-        "Reverse Lunge to High Knee": "/resources/reverseLungeHighKneeAngle2.mp4",
-        // Shoulders
-        "Pike Push-Ups": "/resources/pikePushups.mp4",
-        "Kneeling Spider-Man Push-Ups": "/resources/kneelingSpidermanPushups.mp4",
-        "Spider-Man Push-Ups": "/resources/spidermanPushups.mp4",
-        // Triceps
-        "Bench Dips": "/resources/benchDipsAngle1.mp4",
-        // Glutes
-        "Bridges": "/resources/bridgesAngle2.mp4",
-        "Hip Bucks": "/resources/hipBucks.mp4",
-        "Single Leg Hip Bucks": "/resources/singleLegHipBucks.mp4",
-        // Core
-        "Bear Taps": "/resources/bearTapsAngle2.mp4",
-        "Walking Marches": "/resources/walkingMarches.mp4",
-        "Jackknives - Level 1": "/resources/jackknivesLevel1.mp4",
-        "Russian V-Twists": "/resources/russianVTwistsAngle1.mp4",
-        "Spider-Man Lunges": "/resources/spidermanLungesAngle2.mp4",
-        "Bicycle Crunches": "/resources/bicycleCrunchesAngle2.mp4",
-        "Jackknives - Level 2": "/resources/jackknivesLevel2.mp4",
-        "Mountain Climbers": "/resources/mountainClimbers.mp4",
-        "Plank Elbow to Knee Taps": "/resources/plankElbowToKneeTaps.mp4",
-        "Side Kickthroughs": "/resources/sideKickthroughs.mp4",
-        "Twisting Piston Push-Ups": "/resources/twistingPistonPushUps.mp4",
-        // Core, No Cardio
-        "Ab-Roller": "/resources/abRollerAngle1.mp4",
-        "Bird Dogs": "/resources/birdDogs.mp4",
-        "Good Mornings": "/resources/goodMorningsAngle2.mp4",
-        "Swipers": "/resources/swipersAngle2.mp4",
-        "Plank Elbow Ups": "/resources/plankElbowUps.mp4",
-        "Shoulder Taps": "/resources/shoulderTapsAngle1.mp4",
-        // Cardio
-        "Jump/Air Rope": "/resources/jumprope.mp4",
-        "Shadow Boxing": "/resources/shadowboxing.mp4",
-        "Toe Taps": "/resources/toeTaps.mp4",
-        "High Knees": "/resources/highknees.mp4",
-        "Jumping Jacks": "/resources/jumpingjacks.mp4",
-        "Skier Hops": "/resources/skierhops.mp4",
-    ]
+    var videoPaths: [String: String] {
+        ExerciseCatalog.shared.videoPaths
+    }
 
     // Resolve a relative path for a given key (exercise name/ID)
     @MainActor

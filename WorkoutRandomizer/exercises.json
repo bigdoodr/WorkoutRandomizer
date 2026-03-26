@@ -1,0 +1,110 @@
+{
+    "focusAreas": ["Chest", "Legs", "Legs, No Cardio", "Shoulders", "Triceps", "Glutes", "Core", "Core, No Cardio", "Cardio"],
+    "difficulties": ["Beginner", "Medium", "Hard", "Expert/Advanced"],
+    "exercises": {
+        "Chest": {
+            "Medium": [
+                { "name": "Push-Ups", "videoPath": "/resources/pushupsAngle2.mp4" }
+            ],
+            "Expert/Advanced": [
+                { "name": "One-Legged Skier Push-Ups", "videoPath": "/resources/onelegskierpushups.mp4" }
+            ]
+        },
+        "Legs": {
+            "Beginner": [
+                { "name": "Squats", "videoPath": "/resources/squats.mp4" },
+                { "name": "3-Way Lunges", "videoPath": "/resources/3wayLungesAngle2.mp4" }
+            ],
+            "Medium": [
+                { "name": "Alternating Split Squats", "videoPath": "/resources/splitSquats.mp4" },
+                { "name": "Frog Hops", "videoPath": "/resources/frogHops.mp4" },
+                { "name": "Squat Jumps", "videoPath": "/resources/squatJumps.mp4" }
+            ],
+            "Hard": [
+                { "name": "180° Squat Jumps", "videoPath": "/resources/180JumpSquats.mp4" },
+                { "name": "Ninja Tuck Jumps", "videoPath": "/resources/ninjaTuckJumps.mp4" },
+                { "name": "Prisoner Squat Jumps", "videoPath": "/resources/prisonerSquatJumps.mp4" },
+                { "name": "3-Point Alternating Hops", "videoPath": "/resources/3pointAltHops.mp4" }
+            ],
+            "Expert/Advanced": [
+                { "name": "Prisoner Ninja Tuck Jumps", "videoPath": "/resources/prisonerNinjaTuckJumps.mp4" },
+                { "name": "Triple Skyfalls", "videoPath": "/resources/3xskyfalls.mp4" }
+            ]
+        },
+        "Legs, No Cardio": {
+            "Beginner": [
+                { "name": "Reverse Lunge to High Knee", "videoPath": "/resources/reverseLungeHighKneeAngle2.mp4" }
+            ]
+        },
+        "Shoulders": {
+            "Medium": [
+                { "name": "Pike Push-Ups", "videoPath": "/resources/pikePushups.mp4" }
+            ],
+            "Hard": [
+                { "name": "Kneeling Spider-Man Push-Ups", "videoPath": "/resources/kneelingSpidermanPushups.mp4" }
+            ],
+            "Expert/Advanced": [
+                { "name": "Spider-Man Push-Ups", "videoPath": "/resources/spidermanPushups.mp4" }
+            ]
+        },
+        "Triceps": {
+            "Beginner": [
+                { "name": "Bench Dips", "videoPath": "/resources/benchDipsAngle1.mp4" }
+            ]
+        },
+        "Glutes": {
+            "Beginner": [
+                { "name": "Bridges", "videoPath": "/resources/bridgesAngle2.mp4" },
+                { "name": "Hip Bucks", "videoPath": "/resources/hipBucks.mp4" }
+            ],
+            "Medium": [
+                { "name": "Single Leg Hip Bucks", "videoPath": "/resources/singleLegHipBucks.mp4" }
+            ]
+        },
+        "Core": {
+            "Beginner": [
+                { "name": "Bear Taps", "videoPath": "/resources/bearTapsAngle2.mp4" },
+                { "name": "Walking Marches", "videoPath": "/resources/walkingMarches.mp4" }
+            ],
+            "Medium": [
+                { "name": "Jackknives - Level 1", "videoPath": "/resources/jackknivesLevel1.mp4" },
+                { "name": "Russian V-Twists", "videoPath": "/resources/russianVTwistsAngle1.mp4" },
+                { "name": "Spider-Man Lunges", "videoPath": "/resources/spidermanLungesAngle2.mp4" }
+            ],
+            "Hard": [
+                { "name": "Bicycle Crunches", "videoPath": "/resources/bicycleCrunchesAngle2.mp4" },
+                { "name": "Jackknives - Level 2", "videoPath": "/resources/jackknivesLevel2.mp4" },
+                { "name": "Mountain Climbers", "videoPath": "/resources/mountainClimbers.mp4" },
+                { "name": "Plank Elbow to Knee Taps", "videoPath": "/resources/plankElbowToKneeTaps.mp4" },
+                { "name": "Side Kickthroughs", "videoPath": "/resources/sideKickthroughs.mp4" }
+            ],
+            "Expert/Advanced": [
+                { "name": "Twisting Piston Push-Ups", "videoPath": "/resources/twistingPistonPushUps.mp4" }
+            ]
+        },
+        "Core, No Cardio": {
+            "Beginner": [
+                { "name": "Ab-Roller", "videoPath": "/resources/abRollerAngle1.mp4" },
+                { "name": "Bird Dogs", "videoPath": "/resources/birdDogs.mp4" },
+                { "name": "Good Mornings", "videoPath": "/resources/goodMorningsAngle2.mp4" },
+                { "name": "Swipers", "videoPath": "/resources/swipersAngle2.mp4" }
+            ],
+            "Medium": [
+                { "name": "Plank Elbow Ups", "videoPath": "/resources/plankElbowUps.mp4" },
+                { "name": "Shoulder Taps", "videoPath": "/resources/shoulderTapsAngle1.mp4" }
+            ]
+        },
+        "Cardio": {
+            "Beginner": [
+                { "name": "Jump/Air Rope", "videoPath": "/resources/jumprope.mp4" },
+                { "name": "Shadow Boxing", "videoPath": "/resources/shadowboxing.mp4" },
+                { "name": "Toe Taps", "videoPath": "/resources/toeTaps.mp4" }
+            ],
+            "Medium": [
+                { "name": "High Knees", "videoPath": "/resources/highknees.mp4" },
+                { "name": "Jumping Jacks", "videoPath": "/resources/jumpingjacks.mp4" },
+                { "name": "Skier Hops", "videoPath": "/resources/skierhops.mp4" }
+            ]
+        }
+    }
+}

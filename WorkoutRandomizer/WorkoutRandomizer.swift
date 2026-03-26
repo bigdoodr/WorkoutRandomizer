@@ -169,104 +169,14 @@ struct WorkoutGeneratorView: View {
     @State private var enableSound_macOS = true
     
     @StateObject private var videoManager = VideoManager.shared
+    @State private var catalog = ExerciseCatalog.shared
     @AppStorage("videoMode") private var videoModeRaw: String = VideoMode.stream.rawValue
     @State private var showVideoModePrompt = false
     @State private var downloadProgress: (completed: Int, total: Int)? = nil
     
-    let focusAreas = ["Chest", "Legs", "Legs, No Cardio", "Shoulders", "Triceps", "Glutes", "Core", "Core, No Cardio", "Cardio"]
-    let difficulties = ["Beginner", "Medium", "Hard", "Expert/Advanced"]
-    
-    let exercises: [String: [String: [Exercise]]] = [
-        "Chest": [
-            "Beginner": [],
-            "Medium": [Exercise(name: "Push-Ups", videoPath: "/resources/pushupsAngle2.mp4")],
-            "Hard": [],
-            "Expert/Advanced": [Exercise(name: "One-Legged Skier Push-Ups", videoPath: "/resources/onelegskierpushups.mp4")]
-        ],
-        "Legs": [
-            "Beginner": [
-                Exercise(name: "Squats", videoPath: "/resources/squats.mp4"),
-                Exercise(name: "3-Way Lunges", videoPath: "/resources/3wayLungesAngle2.mp4")
-            ],
-            "Medium": [
-                Exercise(name: "Alternating Split Squats", videoPath: "/resources/splitSquats.mp4"),
-                Exercise(name: "Frog Hops", videoPath: "/resources/frogHops.mp4"),
-                Exercise(name: "Squat Jumps", videoPath: "/resources/squatJumps.mp4")
-            ],
-            "Hard": [
-                Exercise(name: "180° Squat Jumps", videoPath: "/resources/180JumpSquats.mp4"),
-                Exercise(name: "Ninja Tuck Jumps", videoPath: "/resources/ninjaTuckJumps.mp4"),
-                Exercise(name: "Prisoner Squat Jumps", videoPath: "/resources/prisonerSquatJumps.mp4"),
-                Exercise(name: "3-Point Alternating Hops", videoPath: "/resources/3pointAltHops.mp4")
-            ],
-            "Expert/Advanced": [
-                Exercise(name: "Prisoner Ninja Tuck Jumps", videoPath: "/resources/prisonerNinjaTuckJumps.mp4"),
-                Exercise(name: "Triple Skyfalls", videoPath: "/resources/3xskyfalls.mp4")
-            ]
-        ],
-        "Legs, No Cardio": [
-            "Beginner": [Exercise(name: "Reverse Lunge to High Knee", videoPath: "/resources/reverseLungeHighKneeAngle2.mp4")]
-        ],
-        "Shoulders": [
-            "Beginner": [],
-            "Medium": [Exercise(name: "Pike Push-Ups", videoPath: "/resources/pikePushups.mp4")],
-            "Hard": [Exercise(name: "Kneeling Spider-Man Push-Ups", videoPath: "/resources/kneelingSpidermanPushups.mp4")],
-            "Expert/Advanced": [Exercise(name: "Spider-Man Push-Ups", videoPath: "/resources/spidermanPushups.mp4")]
-        ],
-        "Triceps": [
-            "Beginner": [Exercise(name: "Bench Dips", videoPath: "/resources/benchDipsAngle1.mp4")]
-        ],
-        "Glutes": [
-            "Beginner": [
-                Exercise(name: "Bridges", videoPath: "/resources/bridgesAngle2.mp4"),
-                Exercise(name: "Hip Bucks", videoPath: "/resources/hipBucks.mp4")
-            ],
-            "Medium": [Exercise(name: "Single Leg Hip Bucks", videoPath: "/resources/singleLegHipBucks.mp4")]
-        ],
-        "Core": [
-            "Beginner": [
-                Exercise(name: "Bear Taps", videoPath: "/resources/bearTapsAngle2.mp4"),
-                Exercise(name: "Walking Marches", videoPath: "/resources/walkingMarches.mp4")
-            ],
-            "Medium": [
-                Exercise(name: "Jackknives - Level 1", videoPath: "/resources/jackknivesLevel1.mp4"),
-                Exercise(name: "Russian V-Twists", videoPath: "/resources/russianVTwistsAngle1.mp4"),
-                Exercise(name: "Spider-Man Lunges", videoPath: "/resources/spidermanLungesAngle2.mp4")
-            ],
-            "Hard": [
-                Exercise(name: "Bicycle Crunches", videoPath: "/resources/bicycleCrunchesAngle2.mp4"),
-                Exercise(name: "Jackknives - Level 2", videoPath: "/resources/jackknivesLevel2.mp4"),
-                Exercise(name: "Mountain Climbers", videoPath: "/resources/mountainClimbers.mp4"),
-                Exercise(name: "Plank Elbow to Knee Taps", videoPath: "/resources/plankElbowToKneeTaps.mp4"),
-                Exercise(name: "Side Kickthroughs", videoPath: "/resources/sideKickthroughs.mp4")
-            ],
-            "Expert/Advanced": [Exercise(name: "Twisting Piston Push-Ups", videoPath: "/resources/twistingPistonPushUps.mp4")]
-        ],
-        "Core, No Cardio": [
-            "Beginner": [
-                Exercise(name: "Ab-Roller", videoPath: "/resources/abRollerAngle1.mp4"),
-                Exercise(name: "Bird Dogs", videoPath: "/resources/birdDogs.mp4"),
-                Exercise(name: "Good Mornings", videoPath: "/resources/goodMorningsAngle2.mp4"),
-                Exercise(name: "Swipers", videoPath: "/resources/swipersAngle2.mp4")
-            ],
-            "Medium": [
-                Exercise(name: "Plank Elbow Ups", videoPath: "/resources/plankElbowUps.mp4"),
-                Exercise(name: "Shoulder Taps", videoPath: "/resources/shoulderTapsAngle1.mp4")
-            ]
-        ],
-        "Cardio": [
-            "Beginner": [
-                Exercise(name: "Jump/Air Rope", videoPath: "/resources/jumprope.mp4"),
-                Exercise(name: "Shadow Boxing", videoPath: "/resources/shadowboxing.mp4"),
-                Exercise(name: "Toe Taps", videoPath: "/resources/toeTaps.mp4")
-            ],
-            "Medium": [
-                Exercise(name: "High Knees", videoPath: "/resources/highknees.mp4"),
-                Exercise(name: "Jumping Jacks", videoPath: "/resources/jumpingjacks.mp4"),
-                Exercise(name: "Skier Hops", videoPath: "/resources/skierhops.mp4")
-            ]
-        ]
-    ]
+    var focusAreas: [String] { catalog.focusAreas }
+    var difficulties: [String] { catalog.difficulties }
+    var exercises: [String: [String: [Exercise]]] { catalog.exercises }
     
     var body: some View {
         NavigationStack {
@@ -666,6 +576,9 @@ struct WorkoutGeneratorView: View {
             if !videoManager.didPromptForVideoMode {
                 showVideoModePrompt = true
             }
+        }
+        .task {
+            await catalog.refresh()
         }
         .confirmationDialog("Select Video Mode", isPresented: $showVideoModePrompt, titleVisibility: .visible) {
             Button(VideoMode.downloadOnFirstLaunch.rawValue) {
