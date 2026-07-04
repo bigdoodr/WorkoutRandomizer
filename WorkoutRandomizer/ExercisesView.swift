@@ -310,6 +310,11 @@ private struct ExerciseRow: View {
                     Image(systemName: "play.circle.fill")
                         .font(.title2)
                 }
+            } else if VideoMode(rawValue: videoManager.videoMode) != VideoMode.none {
+                Text("No Video")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .italic()
             }
         }
         .contentShape(Rectangle())

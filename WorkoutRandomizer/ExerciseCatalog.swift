@@ -10,6 +10,7 @@ import Observation
 struct CatalogExercise: Codable, Equatable {
     let name: String
     let videoPath: String?
+    let equipment: [String]?
 }
 
 struct CatalogData: Codable, Equatable {
@@ -40,7 +41,7 @@ final class ExerciseCatalog {
     var exercises: [String: [String: [Exercise]]] {
         data.exercises.mapValues { difficultyDict in
             difficultyDict.mapValues { catalogExercises in
-                catalogExercises.map { Exercise(name: $0.name, videoPath: $0.videoPath) }
+                catalogExercises.map { Exercise(name: $0.name, videoPath: $0.videoPath, equipment: $0.equipment ?? ["None"]) }
             }
         }
     }

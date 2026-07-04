@@ -96,6 +96,52 @@ struct WorkoutGeneratorApp: App {
 struct Exercise {
     let name: String
     let videoPath: String?
+    let equipment: [String]
+}
+
+enum TimerStyle: String, CaseIterable, Identifiable {
+    case standard = "Standard"
+    case pyramid = "Pyramid"
+    var id: String { rawValue }
+}
+
+struct UserExercise: Codable, Identifiable {
+    var id: UUID = UUID()
+    var name: String
+    var focusArea: String
+    var difficulty: String
+}
+
+@MainActor
+@Observable
+final class CustomExerciseStore {
+    static let shared = CustomExerciseStore()
+    private static let storageKey = "customExercises_v1"
+
+    var exercises: [UserExercise] = []
+
+    private init() {
+        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
+           let decoded = try? JSONDecoder().decode([UserExercise].self, from: data) {
+            exercises = decoded
+        }
+    }
+
+    func add(_ exercise: UserExercise) {
+        exercises.append(exercise)
+        persist()
+    }
+
+    func remove(at offsets: IndexSet) {
+        exercises.remove(atOffsets: offsets)
+        persist()
+    }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(exercises) {
+            UserDefaults.standard.set(data, forKey: Self.storageKey)
+        }
+    }
 }
 
 struct WorkoutItem {
@@ -168,6 +214,10 @@ struct WorkoutGeneratorView: View {
     @State private var enableHaptics_iOS_vision = true
     @State private var enableSound_macOS = true
     
+    @State private var selectedEquipment: Set<String> = ["None"]
+    @State private var timerStyle: TimerStyle = .standard
+    @State private var customExerciseStore = CustomExerciseStore.shared
+
     @StateObject private var videoManager = VideoManager.shared
     @State private var catalog = ExerciseCatalog.shared
     @AppStorage("videoMode") private var videoModeRaw: String = VideoMode.stream.rawValue
@@ -184,22 +234,32 @@ struct WorkoutGeneratorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         
-                        // View Exercises
-                        VStack(alignment: .leading, spacing: 12) {
-                            Button {
-                                // Navigate to the Exercises view
-                            } label: {
-                                NavigationLink(destination: ExercisesView(exercisesByArea: exercises)) {
-                                    HStack {
-                                        Image(systemName: "list.bullet.rectangle.portrait")
-                                        Text("View Exercises")
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(.purple)
-                                    .foregroundStyle(.white)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                        // View Exercises / My Exercises
+                        HStack(spacing: 10) {
+                            NavigationLink(destination: ExercisesView(exercisesByArea: exercises)) {
+                                HStack {
+                                    Image(systemName: "list.bullet.rectangle.portrait")
+                                    Text("All Exercises")
                                 }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(.purple)
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            NavigationLink(destination: MyExercisesView(
+                                focusAreas: focusAreas,
+                                difficulties: difficulties
+                            )) {
+                                HStack {
+                                    Image(systemName: "person.badge.plus")
+                                    Text("My Exercises")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(.indigo)
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
                         }
                         
@@ -246,6 +306,33 @@ struct WorkoutGeneratorView: View {
                             }
                         }
                         
+                        // Equipment Available
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Equipment Available")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
+                                ForEach(["None", "Ab Roller", "Chair/Box/Bench"], id: \.self) { item in
+                                    HStack {
+                                        Image(systemName: selectedEquipment.contains(item) ? "checkmark.square.fill" : "square")
+                                            .foregroundStyle(selectedEquipment.contains(item) ? .blue : .secondary)
+                                        Text(item)
+                                            .font(.subheadline)
+                                        Spacer()
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if selectedEquipment.contains(item) {
+                                            selectedEquipment.remove(item)
+                                        } else {
+                                            selectedEquipment.insert(item)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Difficulty
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Difficulty")
@@ -268,7 +355,45 @@ struct WorkoutGeneratorView: View {
                             }
                         }
                         
-                        // Durations
+                        // Timer Style
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Timer Style")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+
+                            HStack(spacing: 15) {
+                                ForEach(TimerStyle.allCases) { style in
+                                    HStack {
+                                        Image(systemName: timerStyle == style ? "circle.fill" : "circle")
+                                            .foregroundStyle(timerStyle == style ? .blue : .secondary)
+                                        Text(style.rawValue)
+                                            .font(.subheadline)
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { timerStyle = style }
+                                }
+                            }
+
+                            if timerStyle == .pyramid {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("6-round pyramid — each round shares work & rest duration:")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    ForEach(["30s work + 30s rest", "40s work + 40s rest", "50s work + 50s rest",
+                                             "50s work + 50s rest", "40s work + 40s rest", "30s work + 30s rest"], id: \.self) { label in
+                                        Text("• \(label)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(10)
+                                .background(.gray.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+
+                        // Durations (hidden in Pyramid mode — intervals are fixed)
+                        if timerStyle == .standard {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Durations")
                                 .font(.title2)
@@ -352,7 +477,8 @@ struct WorkoutGeneratorView: View {
                                 }
                             }
                         }
-                        
+                        } // end if timerStyle == .standard
+
                         // Feedback Settings
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Feedback")
@@ -526,6 +652,7 @@ struct WorkoutGeneratorView: View {
                 exerciseDuration: exerciseDuration,
                 restDuration: restDuration,
                 restEvery: restEvery,
+                timerStyle: timerStyle,
                 enableSound_iOS_tv_vision: enableSound_iOS_tv_vision,
                 enableHaptics_iOS_vision: enableHaptics_iOS_vision,
                 enableSound_macOS: enableSound_macOS
@@ -644,43 +771,68 @@ struct WorkoutGeneratorView: View {
     
     private func generateWorkout() {
         isGenerating = true
-        
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             let allowedLevels = getAllowedLevels(for: difficulty)
             var pool: [Exercise] = []
-            
-            // Build exercise pool
+
+            // Build exercise pool, filtered by selected equipment
             for area in selectedFocusAreas {
                 for level in allowedLevels {
                     if let areaExercises = exercises[area],
                        let levelExercises = areaExercises[level] {
-                        pool.append(contentsOf: levelExercises)
+                        let available = levelExercises.filter { ex in
+                            ex.equipment.contains { selectedEquipment.contains($0) }
+                        }
+                        pool.append(contentsOf: available)
                     }
                 }
             }
-            
+
+            // Merge user-defined custom exercises
+            for custom in customExerciseStore.exercises {
+                if selectedFocusAreas.contains(custom.focusArea) && allowedLevels.contains(custom.difficulty) && selectedEquipment.contains("None") {
+                    pool.append(Exercise(name: custom.name, videoPath: nil, equipment: ["None"]))
+                }
+            }
+
             guard !pool.isEmpty else {
                 isGenerating = false
                 return
             }
-            
-            // Calculate number of exercises needed
-            let fullCycle = Double(exerciseDuration) + (Double(restDuration) / Double(restEvery))
-            let totalSecs = Double(totalDuration) * 60
-            let maxExercises = Int(ceil(totalSecs / fullCycle))
-            
+
+            // Pyramid mode targets exactly 6 exercises (one per pyramid level)
+            let maxExercises: Int
+            if timerStyle == .pyramid {
+                maxExercises = 6
+            } else {
+                let fullCycle = Double(exerciseDuration) + (Double(restDuration) / Double(restEvery))
+                let totalSecs = Double(totalDuration) * 60
+                maxExercises = Int(ceil(totalSecs / fullCycle))
+            }
+
             // Create balanced routine
             let selected = createBalancedRoutine(from: pool, maxCount: maxExercises)
-            
+
             // Build final routine with rests
             var routine: [Exercise] = []
-            for (index, exercise) in selected.enumerated() {
-                routine.append(exercise)
-                if ((index + 1) % restEvery == 0) && (index != selected.count - 1) {
-                    routine.append(Exercise(name: "Rest", videoPath: nil))
+            if timerStyle == .pyramid {
+                // Every exercise gets its own rest (except the last)
+                for (index, exercise) in selected.enumerated() {
+                    routine.append(exercise)
+                    if index < selected.count - 1 {
+                        routine.append(Exercise(name: "Rest", videoPath: nil, equipment: ["None"]))
+                    }
+                }
+            } else {
+                for (index, exercise) in selected.enumerated() {
+                    routine.append(exercise)
+                    if ((index + 1) % restEvery == 0) && (index != selected.count - 1) {
+                        routine.append(Exercise(name: "Rest", videoPath: nil, equipment: ["None"]))
+                    }
                 }
             }
-            
+
             generatedRoutine = routine
             isGenerating = false
             scrollToGeneratedToken = UUID()
@@ -762,7 +914,7 @@ struct WorkoutGeneratorView: View {
             }
             
             // If found, use it; otherwise create a basic exercise with no video
-            let exercise = foundExercise ?? Exercise(name: exportableExercise.name, videoPath: nil)
+            let exercise = foundExercise ?? Exercise(name: exportableExercise.name, videoPath: nil, equipment: ["None"])
             importedRoutine.append(exercise)
             
             // Update durations from the first non-rest exercise only
@@ -785,15 +937,28 @@ struct WorkoutPlayerView: View {
     let exerciseDuration: Int
     let restDuration: Int
     let restEvery: Int
+    let timerStyle: TimerStyle
     let enableSound_iOS_tv_vision: Bool
     let enableHaptics_iOS_vision: Bool
     let enableSound_macOS: Bool
-    
+
+    static let pyramidIntervals: [(work: Int, rest: Int)] = [
+        (30, 30), (40, 40), (50, 50), (50, 50), (40, 40), (30, 30)
+    ]
+
     @State private var currentIndex = 0
     @State private var timeRemaining = 0
     @State private var isPlaying = false
     @State private var isPaused = false
     @State private var timer: Timer?
+
+    // Workout stats
+    @State private var totalExerciseTime = 0
+    @State private var totalRestTime = 0
+    @State private var completedExerciseNames: [String] = []
+    @State private var peakHeartRate: Double = 0
+    @State private var heartRateSamples: [Double] = []
+    @State private var showingRecap = false
 #if canImport(AVFoundation)
     @State private var audioEngine: AVAudioEngine?
     @State private var playerNode: AVAudioPlayerNode?
@@ -830,7 +995,27 @@ struct WorkoutPlayerView: View {
             return nextExercise.name
         }
     }
-    
+
+    private var currentPyramidPhase: Int {
+        guard timerStyle == .pyramid else { return 0 }
+        let workBefore = routine[0..<min(currentIndex, routine.count)].filter { $0.name != "Rest" }.count
+        let phase = isRest ? max(0, workBefore - 1) : workBefore
+        return phase % Self.pyramidIntervals.count
+    }
+
+    private var durationForCurrentPosition: Int {
+        guard let exercise = currentExercise else { return 0 }
+        if timerStyle == .pyramid {
+            let interval = Self.pyramidIntervals[currentPyramidPhase]
+            return exercise.name == "Rest" ? interval.rest : interval.work
+        }
+        return exercise.name == "Rest" ? restDuration : exerciseDuration
+    }
+
+    private var averageHeartRate: Double {
+        heartRateSamples.isEmpty ? 0 : heartRateSamples.reduce(0, +) / Double(heartRateSamples.count)
+    }
+
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
@@ -858,6 +1043,25 @@ struct WorkoutPlayerView: View {
                                     .frame(height: min(height * 0.35, 220))
                                 #endif
                                     .cornerRadius(10)
+                            } else if !isRest {
+                                // Exercise has no video — show a subtle placeholder
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.gray.opacity(0.08))
+                                    VStack(spacing: 6) {
+                                        Image(systemName: "video.slash")
+                                            .font(.title)
+                                            .foregroundStyle(.secondary)
+                                        Text("No Video Available")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                #if os(iOS)
+                                .frame(height: min(height * 0.35, UIDevice.current.userInterfaceIdiom == .pad ? 240 : 180))
+                                #else
+                                .frame(height: min(height * 0.35, 220))
+                                #endif
                             }
                         }
 
@@ -895,13 +1099,37 @@ struct WorkoutPlayerView: View {
                             }
                         }
                         
-                        // Health Metrics from Apple Watch (iOS only)
+                        // Live workout stats (exercise time, HR zone, nutrient burn)
+                        if isPlaying {
+                            #if os(iOS)
+                            WorkoutLiveStatsView(
+                                exerciseTime: totalExerciseTime,
+                                heartRate: connectivityManager.heartRate,
+                                hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0
+                            )
+                            .padding(.top, 4)
+                            #else
+                            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false)
+                                .padding(.top, 4)
+                            #endif
+                        }
+
+                        // Apple Watch full metrics panel
                         #if os(iOS)
                         if isPlaying && connectivityManager.isWatchConnected {
                             HealthMetricsView(connectivityManager: connectivityManager)
-                                .padding(.top, 8)
+                                .padding(.top, 4)
                         }
                         #endif
+
+                        // Pyramid level indicator
+                        if timerStyle == .pyramid && isPlaying {
+                            let phase = currentPyramidPhase
+                            let interval = WorkoutPlayerView.pyramidIntervals[phase]
+                            Text("Pyramid \(phase + 1) of \(WorkoutPlayerView.pyramidIntervals.count)  •  \(isRest ? interval.rest : interval.work)s")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
                         Spacer(minLength: 0)
                     }
@@ -991,16 +1219,36 @@ struct WorkoutPlayerView: View {
         }
         .onAppear {
             setupAudio()
-            if let exercise = currentExercise {
-                timeRemaining = exercise.name == "Rest" ? restDuration : exerciseDuration
+            if currentExercise != nil {
+                timeRemaining = durationForCurrentPosition
             }
             prepareVideoForCurrentExercise(autoplay: false)
         }
         .onDisappear {
             stopWorkout()
         }
+        .sheet(isPresented: $showingRecap) {
+            WorkoutRecapView(
+                completedExercises: completedExerciseNames,
+                totalExerciseTime: totalExerciseTime,
+                totalRestTime: totalRestTime,
+                totalCalories: {
+                    #if os(iOS)
+                    return connectivityManager.activeCalories
+                    #else
+                    return 0
+                    #endif
+                }(),
+                peakHeartRate: peakHeartRate,
+                averageHeartRate: averageHeartRate,
+                onDismiss: {
+                    showingRecap = false
+                    dismiss()
+                }
+            )
+        }
     }
-    
+
     private func prepareVideoForCurrentExercise(autoplay: Bool) {
         // Clear any previous end observer
         if let obs = playerEndObserver {
@@ -1279,9 +1527,25 @@ struct WorkoutPlayerView: View {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             guard !isPaused else { return }
-            
+
             timeRemaining -= 1
-            
+
+            // Track exercise vs rest time
+            if isRest {
+                totalRestTime += 1
+            } else {
+                totalExerciseTime += 1
+            }
+
+            // Sample heart rate for recap stats
+            #if os(iOS)
+            let hr = connectivityManager.heartRate
+            if hr > 0 {
+                heartRateSamples.append(hr)
+                if hr > peakHeartRate { peakHeartRate = hr }
+            }
+            #endif
+
             // Send timer update to watch every second
             #if os(iOS)
             let currentTime = timeRemaining
@@ -1289,36 +1553,39 @@ struct WorkoutPlayerView: View {
                 connectivityManager.sendTimerUpdate(timeRemaining: currentTime)
             }
             #endif
-            
+
             if timeRemaining == 3 {
-                playFeedback(.warning) // Warning beep
+                playFeedback(.warning)
             }
-            
+
             if timeRemaining <= 0 {
-                playFeedback(.end) // End beep
+                playFeedback(.end)
                 nextExercise()
             }
         }
     }
     
     private func nextExercise() {
+        // Record the completed exercise before advancing
+        if let ex = currentExercise, ex.name != "Rest" {
+            completedExerciseNames.append(ex.name)
+        }
+
         currentIndex += 1
-        
+
         if currentIndex >= routine.count {
-            // Workout complete
             playFeedback(.complete)
             sendWorkoutStateToWatch()
-            // Delay stopping the workout to allow completion sound to finish playing
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 self.stopWorkout()
+                self.showingRecap = true
             }
             return
         }
-        
-        let exercise = routine[currentIndex]
-        timeRemaining = exercise.name == "Rest" ? restDuration : exerciseDuration
+
+        timeRemaining = durationForCurrentPosition
         prepareVideoForCurrentExercise(autoplay: true)
-        playFeedback(.start) // Start beep for next exercise
+        playFeedback(.start)
         sendWorkoutStateToWatch()
     }
     
@@ -1362,3 +1629,316 @@ fileprivate extension Array where Element: Hashable {
         return filter { seen.insert($0).inserted }
     }
 }
+// MARK: - WorkoutLiveStatsView
+
+struct WorkoutLiveStatsView: View {
+    let exerciseTime: Int
+    let heartRate: Double
+    let hasWatchData: Bool
+
+    private var hrInfo: (zone: String, color: Color, nutrient: String) {
+        switch heartRate {
+        case ..<100: return ("Zone 1", .green, "Fat Burn (Max)")
+        case 100..<130: return ("Zone 2", .yellow, "Fat Burn")
+        case 130..<150: return ("Zone 3", .orange, "Mixed")
+        case 150..<165: return ("Zone 4", .red, "Carb Burn")
+        default:        return ("Zone 5", .purple, "Peak Effort")
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            VStack(spacing: 2) {
+                Image(systemName: "stopwatch")
+                    .foregroundStyle(.blue)
+                Text(formattedTime(exerciseTime))
+                    .font(.system(.subheadline, design: .monospaced))
+                    .fontWeight(.semibold)
+                Text("Ex. Time")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if hasWatchData {
+                Divider().frame(height: 40)
+                VStack(spacing: 2) {
+                    Image(systemName: "waveform.path.ecg")
+                        .foregroundStyle(hrInfo.color)
+                    Text(hrInfo.zone)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(hrInfo.color)
+                    Text("HR Zone")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Divider().frame(height: 40)
+                VStack(spacing: 2) {
+                    Image(systemName: "bolt.fill")
+                        .foregroundStyle(hrInfo.color)
+                    Text(hrInfo.nutrient)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    Text("Burn Type")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func formattedTime(_ seconds: Int) -> String {
+        String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+// MARK: - WorkoutRecapView
+
+struct WorkoutRecapView: View {
+    let completedExercises: [String]
+    let totalExerciseTime: Int
+    let totalRestTime: Int
+    let totalCalories: Double
+    let peakHeartRate: Double
+    let averageHeartRate: Double
+    let onDismiss: () -> Void
+
+    private var totalTime: Int { totalExerciseTime + totalRestTime }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    VStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 64))
+                            .foregroundStyle(.green)
+                        Text("Workout Complete!")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                    }
+                    .padding(.top, 8)
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                        RecapStatCard(title: "Total Time",     value: formatted(totalTime),         icon: "clock",            color: .blue)
+                        RecapStatCard(title: "Exercise Time",  value: formatted(totalExerciseTime),  icon: "figure.run",       color: .green)
+                        RecapStatCard(title: "Exercises Done", value: "\(completedExercises.count)", icon: "checkmark.square", color: .orange)
+                        RecapStatCard(title: "Rest Time",      value: formatted(totalRestTime),      icon: "pause.circle",     color: .purple)
+                        if totalCalories > 0 {
+                            RecapStatCard(title: "Calories",   value: "\(Int(totalCalories)) kcal", icon: "flame.fill",   color: .orange)
+                        }
+                        if peakHeartRate > 0 {
+                            RecapStatCard(title: "Peak HR",    value: "\(Int(peakHeartRate)) BPM",  icon: "heart.fill",   color: .red)
+                        }
+                        if averageHeartRate > 0 {
+                            RecapStatCard(title: "Avg HR",     value: "\(Int(averageHeartRate)) BPM", icon: "heart",      color: .pink)
+                        }
+                    }
+
+                    if !completedExercises.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Exercises Completed")
+                                .font(.headline)
+                            ForEach(Array(completedExercises.enumerated()), id: \.offset) { i, name in
+                                HStack {
+                                    Text("\(i + 1).")
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 28, alignment: .leading)
+                                    Text(name)
+                                        .font(.subheadline)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(.gray.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Recap")
+#if os(iOS) || os(visionOS)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { onDismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+#else
+            .toolbar {
+                ToolbarItem {
+                    Button("Done") { onDismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+#endif
+        }
+    }
+
+    private func formatted(_ seconds: Int) -> String {
+        String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+private struct RecapStatCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(color)
+            Text(value)
+                .font(.headline)
+                .fontWeight(.bold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(.gray.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+// MARK: - My Exercises
+
+struct MyExercisesView: View {
+    @State private var store = CustomExerciseStore.shared
+    @State private var showingAdd = false
+
+    let focusAreas: [String]
+    let difficulties: [String]
+
+    var body: some View {
+        List {
+            if store.exercises.isEmpty {
+                Text("No custom exercises yet. Tap + to add one.")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+            }
+            ForEach(store.exercises) { exercise in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(exercise.name)
+                        .font(.body)
+                    Text("\(exercise.focusArea) — \(exercise.difficulty)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onDelete { offsets in
+                store.remove(at: offsets)
+            }
+        }
+        .navigationTitle("My Exercises")
+        .toolbar {
+#if os(iOS)
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showingAdd = true } label: { Image(systemName: "plus") }
+            }
+            ToolbarItem(placement: .navigationBarLeading) {
+                EditButton()
+            }
+#else
+            ToolbarItem {
+                Button { showingAdd = true } label: { Image(systemName: "plus") }
+            }
+#endif
+        }
+        .sheet(isPresented: $showingAdd) {
+            AddExerciseView(focusAreas: focusAreas, difficulties: difficulties) { exercise in
+                store.add(exercise)
+            }
+        }
+    }
+}
+
+struct AddExerciseView: View {
+    let focusAreas: [String]
+    let difficulties: [String]
+    let onAdd: (UserExercise) -> Void
+
+    @State private var name = ""
+    @State private var selectedFocus = ""
+    @State private var selectedDifficulty = "Beginner"
+    @Environment(\.dismiss) private var dismiss
+
+    private var isValid: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty && !selectedFocus.isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Exercise Name") {
+                    TextField("e.g. Diamond Push-Ups", text: $name)
+                }
+                Section("Focus Area") {
+#if os(iOS)
+                    Picker("Focus Area", selection: $selectedFocus) {
+                        ForEach(focusAreas, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.wheel)
+#else
+                    Picker("Focus Area", selection: $selectedFocus) {
+                        ForEach(focusAreas, id: \.self) { Text($0).tag($0) }
+                    }
+#endif
+                }
+                Section("Difficulty") {
+                    Picker("Difficulty", selection: $selectedDifficulty) {
+                        ForEach(difficulties, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+            .navigationTitle("Add Exercise")
+#if os(iOS) || os(visionOS)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Add") {
+                        onAdd(UserExercise(name: name.trimmingCharacters(in: .whitespaces),
+                                          focusArea: selectedFocus,
+                                          difficulty: selectedDifficulty))
+                        dismiss()
+                    }
+                    .disabled(!isValid)
+                }
+            }
+#else
+            .toolbar {
+                ToolbarItem { Button("Cancel") { dismiss() } }
+                ToolbarItem {
+                    Button("Add") {
+                        onAdd(UserExercise(name: name.trimmingCharacters(in: .whitespaces),
+                                          focusArea: selectedFocus,
+                                          difficulty: selectedDifficulty))
+                        dismiss()
+                    }
+                    .disabled(!isValid)
+                }
+            }
+#endif
+            .onAppear {
+                if selectedFocus.isEmpty { selectedFocus = focusAreas.first ?? "" }
+            }
+        }
+    }
+}
+
