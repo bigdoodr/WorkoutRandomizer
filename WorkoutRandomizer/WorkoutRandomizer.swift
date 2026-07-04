@@ -1537,19 +1537,18 @@ struct WorkoutPlayerView: View {
                 totalExerciseTime += 1
             }
 
-            // Sample heart rate for recap stats
-            #if os(iOS)
-            let hr = connectivityManager.heartRate
-            if hr > 0 {
-                heartRateSamples.append(hr)
-                if hr > peakHeartRate { peakHeartRate = hr }
-            }
-            #endif
-
-            // Send timer update to watch every second
+            // Sample heart rate for recap stats + send timer update to watch every second.
+            // Both touch the MainActor-isolated connectivityManager, so they're hopped
+            // together in one Task to avoid referencing its main-actor-isolated
+            // properties from the Sendable Timer closure directly.
             #if os(iOS)
             let currentTime = timeRemaining
             Task { @MainActor in
+                let hr = connectivityManager.heartRate
+                if hr > 0 {
+                    heartRateSamples.append(hr)
+                    if hr > peakHeartRate { peakHeartRate = hr }
+                }
                 connectivityManager.sendTimerUpdate(timeRemaining: currentTime)
             }
             #endif
