@@ -29,17 +29,31 @@ struct ExercisesView: View {
     @State private var selectedDifficulty: String = "All"
     @StateObject private var videoManager = VideoManager.shared
 
-    // Detect when the app is configured to not show videos by checking if no URLs can be resolved
-    private var isNoVideoMode: Bool {
-        // If none of the visible exercises can produce a URL, assume videos are disabled
-        // Use a small subset to keep it cheap
+    private static let stretchAreaNames: Set<String> = [
+        "Morning Stretches", "Evening Recovery", "Cool Down", "Warm-Up: Hips", "Warm-Up: Full Body"
+    ]
+
+    private var videoModeIsEnabled: Bool {
+        videoManager.videoMode != VideoMode.none.rawValue
+    }
+
+    private var allVisibleHaveNoVideos: Bool {
         let sample = filteredCatalog.prefix(10)
-        for entry in sample {
-            if VideoManager.shared.url(for: entry.exercise.name) != nil {
-                return false
-            }
-        }
-        return true
+        guard !sample.isEmpty else { return false }
+        return !sample.contains { VideoManager.shared.url(for: $0.exercise.name) != nil }
+    }
+
+    private var regularAreasInFilter: [String] {
+        groupedByArea.keys.filter { !Self.stretchAreaNames.contains($0) }.sorted()
+    }
+
+    private var stretchAreasInFilter: [String] {
+        groupedByArea.keys.filter { Self.stretchAreaNames.contains($0) }.sorted()
+    }
+
+    private func stretchItemsForArea(_ area: String) -> [CatalogEntry] {
+        (groupedByArea[area]?.values.flatMap { $0 } ?? [])
+            .sorted { $0.exercise.name < $1.exercise.name }
     }
 
     @State private var sheetEntry: CatalogEntry? = nil
@@ -48,8 +62,12 @@ struct ExercisesView: View {
     @State private var statusObservation: NSKeyValueObservation? = nil
     @State private var isLoadingVideo: Bool = false
 
-    private var areas: [String] {
-        ["All"] + exercisesByArea.keys.sorted()
+    private var regularAreas: [String] {
+        exercisesByArea.keys.filter { !Self.stretchAreaNames.contains($0) }.sorted()
+    }
+
+    private var stretchAreas: [String] {
+        exercisesByArea.keys.filter { Self.stretchAreaNames.contains($0) }.sorted()
     }
 
     private var difficulties: [String] {
@@ -126,32 +144,61 @@ struct ExercisesView: View {
 
     var body: some View {
         List {
-            if isNoVideoMode {
+            // Banner: distinguish mode-disabled vs. no recordings for this selection
+            if !videoModeIsEnabled {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Video examples are disabled")
-                            .font(.callout)
-                            .bold()
+                            .font(.callout).bold()
                         Text("Switch to \"Stream\" or \"Download All\" on the main page to view video demos.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            } else if allVisibleHaveNoVideos {
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("No video recordings for this selection")
+                            .font(.callout).bold()
+                        Text("Video demonstrations haven't been added for these exercises yet.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
                 }
             }
-            // Group by Focus Area, then Difficulty
-            ForEach(groupedByArea.keys.sorted(), id: \.self) { area in
+
+            // Regular workout areas — alphabetical
+            ForEach(regularAreasInFilter, id: \.self) { area in
                 Section(header: Text(area)) {
-                    ForEach((groupedByArea[area]?.keys.sorted() ?? []), id: \.self) { diff in
-                        let items = groupedByArea[area]?[diff] ?? []
-                        if items.isEmpty {
-                            Text("No exercises")
-                                .foregroundStyle(.secondary)
-                        } else {
+                    let diffs: [String] = groupedByArea[area]?.keys.sorted() ?? []
+                    ForEach(diffs, id: \.self) { diff in
+                        let items: [CatalogEntry] = groupedByArea[area]?[diff] ?? []
+                        if !items.isEmpty {
                             ForEach(items, id: \.exercise.name) { entry in
                                 ExerciseRow(entry: entry) {
                                     prepareAndPresent(entry: entry)
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Stretches — grouped at the bottom under one "Stretches" section
+            if !stretchAreasInFilter.isEmpty {
+                Section(header: HStack(spacing: 6) {
+                    Image(systemName: "figure.cooldown")
+                    Text("Stretches")
+                }.foregroundStyle(.teal)) {
+                    ForEach(stretchAreasInFilter, id: \.self) { area in
+                        Text(area)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.teal)
+                            .listRowBackground(Color.teal.opacity(0.06))
+                        ForEach(stretchItemsForArea(area), id: \.exercise.name) { entry in
+                            ExerciseRow(entry: entry) {
+                                prepareAndPresent(entry: entry)
                             }
                         }
                     }
@@ -163,60 +210,109 @@ struct ExercisesView: View {
 #if os(iOS)
             ToolbarItemGroup(placement: .topBarLeading) {
                 Menu {
-                    ForEach(areas, id: \.self) { area in
-                        Button(action: { selectedArea = area }) {
-                            HStack {
-                                Text(area)
-                                if selectedArea == area { Image(systemName: "checkmark") }
+                    Picker("", selection: $selectedArea) {
+                        Text("All").tag("All")
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                    if !regularAreas.isEmpty {
+                        Picker("Workouts", selection: $selectedArea) {
+                            ForEach(regularAreas, id: \.self) { area in
+                                Text(area).tag(area)
                             }
                         }
+                        .pickerStyle(.inline)
+                    }
+                    if !stretchAreas.isEmpty {
+                        Picker("Stretches", selection: $selectedArea) {
+                            ForEach(stretchAreas, id: \.self) { area in
+                                Text(area).tag(area)
+                            }
+                        }
+                        .pickerStyle(.inline)
                     }
                 } label: {
-                    Label("Focus", systemImage: "line.3.horizontal.decrease.circle")
+                    Label(
+                        selectedArea == "All" ? "Focus" : selectedArea,
+                        systemImage: selectedArea == "All" ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill"
+                    )
                 }
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Menu {
-                    ForEach(difficulties, id: \.self) { diff in
-                        Button(action: { selectedDifficulty = diff }) {
-                            HStack {
-                                Text(diff)
-                                if selectedDifficulty == diff { Image(systemName: "checkmark") }
-                            }
+                    Picker("Difficulty", selection: $selectedDifficulty) {
+                        ForEach(difficulties, id: \.self) { diff in
+                            Text(diff).tag(diff)
                         }
                     }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
                 } label: {
-                    Label("Difficulty", systemImage: "dial.low")
+                    Label(
+                        selectedDifficulty == "All" ? "Difficulty" : selectedDifficulty,
+                        systemImage: selectedDifficulty == "All" ? "dial.low" : "dial.high"
+                    )
                 }
             }
 #else
-            // macOS: use automatic placement and space items apart
             ToolbarItem(placement: .automatic) {
                 Menu {
-                    ForEach(areas, id: \.self) { area in
-                        Button(action: { selectedArea = area }) {
-                            HStack {
-                                Text(area)
-                                if selectedArea == area { Image(systemName: "checkmark") }
+                    Picker("", selection: $selectedArea) {
+                        Text("All").tag("All")
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                    if !regularAreas.isEmpty {
+                        Picker("Workouts", selection: $selectedArea) {
+                            ForEach(regularAreas, id: \.self) { area in
+                                Text(area).tag(area)
                             }
                         }
+                        .pickerStyle(.inline)
+                    }
+                    if !stretchAreas.isEmpty {
+                        Picker("Stretches", selection: $selectedArea) {
+                            ForEach(stretchAreas, id: \.self) { area in
+                                Text(area).tag(area)
+                            }
+                        }
+                        .pickerStyle(.inline)
                     }
                 } label: {
-                    Label("Focus", systemImage: "line.3.horizontal.decrease.circle")
+                    HStack(spacing: 4) {
+                        Image(systemName: selectedArea == "All"
+                              ? "line.3.horizontal.decrease.circle"
+                              : "line.3.horizontal.decrease.circle.fill")
+                        if selectedArea != "All" {
+                            Image(systemName: "checkmark")
+                                .font(.caption.weight(.bold))
+                            Text(selectedArea)
+                                .lineLimit(1)
+                        }
+                    }
+                    .foregroundStyle(selectedArea == "All" ? AnyShapeStyle(.primary) : AnyShapeStyle(Color.accentColor))
                 }
             }
             ToolbarItem(placement: .automatic) {
                 Menu {
-                    ForEach(difficulties, id: \.self) { diff in
-                        Button(action: { selectedDifficulty = diff }) {
-                            HStack {
-                                Text(diff)
-                                if selectedDifficulty == diff { Image(systemName: "checkmark") }
-                            }
+                    Picker("Difficulty", selection: $selectedDifficulty) {
+                        ForEach(difficulties, id: \.self) { diff in
+                            Text(diff).tag(diff)
                         }
                     }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
                 } label: {
-                    Label("Difficulty", systemImage: "dial.low")
+                    HStack(spacing: 4) {
+                        Image(systemName: selectedDifficulty == "All" ? "dial.low" : "dial.high")
+                        if selectedDifficulty != "All" {
+                            Image(systemName: "checkmark")
+                                .font(.caption.weight(.bold))
+                            Text(selectedDifficulty)
+                                .lineLimit(1)
+                        }
+                    }
+                    .foregroundStyle(selectedDifficulty == "All" ? AnyShapeStyle(.primary) : AnyShapeStyle(Color.accentColor))
                 }
             }
 #endif

@@ -59,7 +59,7 @@ final class PlayerContainerView: NSView {
 }
 #endif
 
-private enum FeedbackEvent {
+enum FeedbackEvent {
     case start
     case warning
     case end
@@ -71,12 +71,14 @@ struct WorkoutGeneratorApp: App {
     init() {
 #if canImport(AVFoundation)
     #if os(iOS) || os(tvOS) || os(visionOS)
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-        } catch {
-            // Ignore configuration errors; we'll try again when needed
+        Task.detached {
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+                try session.setActive(true)
+            } catch {
+                // Ignore configuration errors; we'll try again when needed
+            }
         }
     #endif
 #endif
@@ -102,7 +104,64 @@ struct Exercise {
 enum TimerStyle: String, CaseIterable, Identifiable {
     case standard = "Standard"
     case pyramid = "Pyramid"
+    case blocks = "Repeating Blocks"
     var id: String { rawValue }
+}
+
+struct RepeatingBlocksConfig: Equatable {
+    let exercisesPerBlock: Int
+    let blockDurations: [Int]   // work seconds per block; rest = same
+}
+
+enum WorkoutIntention: String, CaseIterable, Identifiable {
+    case generalFitness = "General Fitness"
+    case fatBurn = "Fat Burn"
+    case cardioEndurance = "Cardio Endurance"
+    case strengthPower = "Strength / Power"
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .generalFitness: return "star"
+        case .fatBurn: return "flame"
+        case .cardioEndurance: return "heart"
+        case .strengthPower: return "bolt"
+        }
+    }
+
+    var bannerColor: Color {
+        switch self {
+        case .generalFitness: return .green
+        case .fatBurn: return .orange
+        case .cardioEndurance: return .red
+        case .strengthPower: return .blue
+        }
+    }
+
+    func tip(for zone: String) -> String {
+        switch (self, zone) {
+        case (.fatBurn, "Zone 1"): return "Low intensity — light fat burn."
+        case (.fatBurn, "Zone 2"): return "Optimal fat-oxidation zone."
+        case (.fatBurn, "Zone 3"): return "Mixed fuel — fat + carbs."
+        case (.fatBurn, "Zone 4"): return "Carb-dominant. EPOC effect boosts fat loss post-workout."
+        case (.fatBurn, "Zone 5"): return "Max effort — significant afterburn effect."
+        case (.cardioEndurance, "Zone 1"): return "Recovery pace. Push to Zone 2+ for gains."
+        case (.cardioEndurance, "Zone 2"): return "Builds aerobic base efficiently."
+        case (.cardioEndurance, "Zone 3"): return "Threshold training. Good for endurance."
+        case (.cardioEndurance, "Zone 4"): return "Increases VO₂ max. Key zone for endurance gains."
+        case (.cardioEndurance, "Zone 5"): return "Peak capacity. Use for short intervals."
+        case (.strengthPower, "Zone 1"): return "Active recovery between sets."
+        case (.strengthPower, "Zone 2"): return "Steady circuit pace."
+        case (.strengthPower, "Zone 3"): return "Good for circuit-style strength work."
+        case (.strengthPower, "Zone 4"): return "Power endurance territory."
+        case (.strengthPower, "Zone 5"): return "Explosive power output. Great for HIIT."
+        case (.generalFitness, "Zone 1"): return "Good for warm-up or cool-down."
+        case (.generalFitness, "Zone 2"): return "Steady-state cardio zone."
+        case (.generalFitness, "Zone 3"): return "Moderate effort. Good overall fitness."
+        case (.generalFitness, "Zone 4"): return "High intensity. Improving fitness quickly."
+        default: return "Max effort. Use sparingly."
+        }
+    }
 }
 
 struct UserExercise: Codable, Identifiable {
@@ -216,6 +275,10 @@ struct WorkoutGeneratorView: View {
     
     @State private var selectedEquipment: Set<String> = ["None"]
     @State private var timerStyle: TimerStyle = .standard
+    @State private var selectedIntention: WorkoutIntention = .generalFitness
+    @AppStorage("hasSeenTutorial") private var hasSeenTutorial = false
+    @AppStorage("useAdvancedView") private var useAdvancedView = false
+    @State private var showingTutorial = false
     @State private var customExerciseStore = CustomExerciseStore.shared
 
     @StateObject private var videoManager = VideoManager.shared
@@ -227,6 +290,146 @@ struct WorkoutGeneratorView: View {
     var focusAreas: [String] { catalog.focusAreas }
     var difficulties: [String] { catalog.difficulties }
     var exercises: [String: [String: [Exercise]]] { catalog.exercises }
+    private var allEquipmentOptions: [String] { ["None", "Ab Roller", "Chair/Box/Bench"] }
+
+    private static let stretchKeywords = ["Stretch", "Recovery", "Cool Down", "Warm-Up"]
+    var workoutFocusAreas: [String] {
+        focusAreas.filter { area in
+            !Self.stretchKeywords.contains { area.contains($0) }
+        }
+    }
+
+    private struct QuickFilter {
+        let label: String
+        let icon: String
+        let keywordsAny: [String]
+        let keywordsExclude: [String]
+        let color: Color
+        func areas(_ all: [String]) -> Set<String> {
+            Set(all.filter { a in
+                let lower = a.lowercased()
+                return keywordsAny.contains { lower.contains($0) }
+                    && !keywordsExclude.contains { lower.contains($0) }
+            })
+        }
+    }
+
+    private var quickFilters: [QuickFilter] {
+        [
+            // "All" matched via special-case toggle logic
+            QuickFilter(label: "All", icon: "figure.mixed.cardio",
+                        keywordsAny: workoutFocusAreas.map { $0.lowercased() }, keywordsExclude: [], color: .blue),
+            // Cardio = every area EXCEPT those explicitly marked "No Cardio"
+            QuickFilter(label: "Cardio", icon: "heart.fill",
+                        keywordsAny: workoutFocusAreas.map { $0.lowercased() }, keywordsExclude: ["no cardio"], color: .red),
+            QuickFilter(label: "Core", icon: "figure.core.training",
+                        keywordsAny: ["core"], keywordsExclude: [], color: .orange),
+            QuickFilter(label: "Upper", icon: "figure.arms.open",
+                        keywordsAny: ["upper", "arm", "shoulder", "chest", "back", "tricep", "bicep"], keywordsExclude: [], color: .purple),
+            QuickFilter(label: "Lower", icon: "figure.walk",
+                        keywordsAny: ["leg", "lower", "glute", "squat", "hip"], keywordsExclude: [], color: .green),
+        ]
+    }
+
+    private func isFilterActive(_ filter: QuickFilter) -> Bool {
+        let areas = filter.areas(workoutFocusAreas)
+        if filter.label == "All" { return selectedFocusAreas.count == workoutFocusAreas.count }
+        return !areas.isEmpty && areas.isSubset(of: selectedFocusAreas)
+    }
+
+    private func toggleFilter(_ filter: QuickFilter) {
+        let areas = filter.areas(workoutFocusAreas)
+        if filter.label == "All" {
+            selectedFocusAreas = selectedFocusAreas.count == workoutFocusAreas.count
+                ? [] : Set(workoutFocusAreas)
+        } else if areas.isSubset(of: selectedFocusAreas) {
+            selectedFocusAreas.subtract(areas)
+        } else {
+            selectedFocusAreas.formUnion(areas)
+        }
+    }
+
+    private func equipmentIcon(_ item: String) -> String {
+        switch item {
+        case "None": return "nosign"
+        case "Ab Roller": return "circle.dotted.circle"
+        default: return "chair"
+        }
+    }
+
+    private func equipmentLabel(_ item: String) -> String {
+        switch item {
+        case "Chair/Box/Bench": return "Chair / Box"
+        default: return item
+        }
+    }
+
+#if os(macOS)
+    private var platformBackgroundColor: NSColor { .windowBackgroundColor }
+#else
+    private var platformBackgroundColor: UIColor { .systemBackground }
+#endif
+
+    @ViewBuilder
+    private var focusAreaFilterRow: some View {
+        ZStack(alignment: .trailing) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(quickFilters, id: \.label) { filter in
+                        Button { toggleFilter(filter) } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: filter.icon)
+                                Text(filter.label)
+                            }
+                            .font(.subheadline)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(isFilterActive(filter) ? filter.color : Color.gray.opacity(0.15))
+                            .foregroundStyle(isFilterActive(filter) ? .white : .primary)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 2)
+                .padding(.trailing, 24)
+            }
+            LinearGradient(
+                colors: [.clear, Color(platformBackgroundColor)],
+                startPoint: .leading, endPoint: .trailing
+            )
+            .frame(width: 36)
+            .allowsHitTesting(false)
+        }
+    }
+
+    // Repeating Blocks state
+    @State private var blocksCount: Int = 3
+    @State private var exercisesPerBlock: Int = 3
+    @State private var blockDurations: [Int] = [30, 25, 45]
+    @State private var blocksTotalSets: Int = 2
+
+    var blocksSuperSetSeconds: Int {
+        blockDurations.reduce(0) { $0 + exercisesPerBlock * $1 * 2 }
+    }
+    var blocksAvailableTotalSets: [Int] {
+        let superSetSec = blocksSuperSetSeconds
+        guard superSetSec > 0 else { return [1] }
+        var options: [Int] = []
+        var n = 1
+        while n * superSetSec <= 90 * 60 { options.append(n); n += 1 }
+        return options.isEmpty ? [1] : options
+    }
+    var blocksTotalSeconds: Int { blocksTotalSets * blocksSuperSetSeconds }
+
+    private func clampBlocksTotalSets() {
+        let options = blocksAvailableTotalSets
+        if !options.contains(blocksTotalSets) { blocksTotalSets = options.first ?? 1 }
+    }
+    private func formatBlockTime(_ seconds: Int) -> String {
+        let m = seconds / 60; let s = seconds % 60
+        return s == 0 ? "\(m)m" : "\(m)m \(s)s"
+    }
     
     var body: some View {
         NavigationStack {
@@ -262,19 +465,47 @@ struct WorkoutGeneratorView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
                         }
+
+                        NavigationLink(destination: StretchRoutineView()) {
+                            HStack {
+                                Image(systemName: "figure.cooldown")
+                                Text("Stretch Routine")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(.teal)
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
                         
+                        // Basic/Advanced mode label
+                        if !useAdvancedView {
+                            HStack(spacing: 6) {
+                                Image(systemName: "info.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("Tap \(Image(systemName: "slider.horizontal.3")) for advanced options")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
                         // Focus Areas
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Focus Areas")
                                 .font(.title2)
                                 .fontWeight(.semibold)
-                            
+
+                            // Quick filters — multi-select: tap to toggle each group
+                            focusAreaFilterRow
+
+                            if useAdvancedView {
                             HStack {
                                 Toggle(isOn: Binding(
-                                    get: { selectedFocusAreas.count == focusAreas.count },
+                                    get: { selectedFocusAreas.count == workoutFocusAreas.count },
                                     set: { newValue in
                                         if newValue {
-                                            selectedFocusAreas = Set(focusAreas)
+                                            selectedFocusAreas = Set(workoutFocusAreas)
                                         } else {
                                             selectedFocusAreas.removeAll()
                                         }
@@ -286,7 +517,7 @@ struct WorkoutGeneratorView: View {
                             }
                             
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                                ForEach(focusAreas, id: \.self) { area in
+                                ForEach(workoutFocusAreas, id: \.self) { area in
                                     HStack {
                                         Image(systemName: selectedFocusAreas.contains(area) ? "checkmark.square.fill" : "square")
                                             .foregroundStyle(selectedFocusAreas.contains(area) ? .blue : .secondary)
@@ -304,31 +535,39 @@ struct WorkoutGeneratorView: View {
                                     }
                                 }
                             }
+                            } // end if useAdvancedView
                         }
-                        
+
                         // Equipment Available
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Equipment Available")
                                 .font(.title2)
                                 .fontWeight(.semibold)
 
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                                ForEach(["None", "Ab Roller", "Chair/Box/Bench"], id: \.self) { item in
-                                    HStack {
-                                        Image(systemName: selectedEquipment.contains(item) ? "checkmark.square.fill" : "square")
-                                            .foregroundStyle(selectedEquipment.contains(item) ? .blue : .secondary)
-                                        Text(item)
-                                            .font(.subheadline)
-                                        Spacer()
-                                    }
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
+                            HStack(spacing: 10) {
+                                ForEach(allEquipmentOptions, id: \.self) { item in
+                                    Button {
                                         if selectedEquipment.contains(item) {
                                             selectedEquipment.remove(item)
                                         } else {
                                             selectedEquipment.insert(item)
                                         }
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            Image(systemName: equipmentIcon(item))
+                                                .font(.title2)
+                                            Text(equipmentLabel(item))
+                                                .font(.caption2)
+                                                .multilineTextAlignment(.center)
+                                                .lineLimit(2)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(selectedEquipment.contains(item) ? Color.blue : Color.gray.opacity(0.1))
+                                        .foregroundStyle(selectedEquipment.contains(item) ? .white : .primary)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
                                     }
+                                    .buttonStyle(.plain)
                                 }
                             }
                         }
@@ -354,15 +593,43 @@ struct WorkoutGeneratorView: View {
                                 }
                             }
                         }
-                        
-                        // Timer Style
+
+                        // Intention — single-select icon chips
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Intention")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 10) {
+                                ForEach(WorkoutIntention.allCases) { intent in
+                                    Button { selectedIntention = intent } label: {
+                                        VStack(spacing: 6) {
+                                            Image(systemName: intent.icon)
+                                                .font(.title2)
+                                            Text(intent.rawValue)
+                                                .font(.caption)
+                                                .multilineTextAlignment(.center)
+                                                .lineLimit(2)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(selectedIntention == intent ? intent.bannerColor : Color.gray.opacity(0.1))
+                                        .foregroundStyle(selectedIntention == intent ? .white : .primary)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        // Timer Style — Standard always visible; Pyramid + Blocks advanced only
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Timer Style")
                                 .font(.title2)
                                 .fontWeight(.semibold)
 
                             HStack(spacing: 15) {
-                                ForEach(TimerStyle.allCases) { style in
+                                ForEach(useAdvancedView ? TimerStyle.allCases : [TimerStyle.standard]) { style in
                                     HStack {
                                         Image(systemName: timerStyle == style ? "circle.fill" : "circle")
                                             .foregroundStyle(timerStyle == style ? .blue : .secondary)
@@ -374,9 +641,9 @@ struct WorkoutGeneratorView: View {
                                 }
                             }
 
-                            if timerStyle == .pyramid {
+                            if timerStyle == .pyramid && useAdvancedView {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("6-round pyramid — each round shares work & rest duration:")
+                                    Text("Pyramid cycle repeats to fill total duration — each round shares work & rest:")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     ForEach(["30s work + 30s rest", "40s work + 40s rest", "50s work + 50s rest",
@@ -392,92 +659,219 @@ struct WorkoutGeneratorView: View {
                             }
                         }
 
-                        // Durations (hidden in Pyramid mode — intervals are fixed)
-                        if timerStyle == .standard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Durations")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                            
-                            VStack(spacing: 15) {
-                                HStack {
-                                    Text("Total Duration")
-                                        .font(.subheadline)
-                                    Spacer()
-                                    Text("\(totalDuration) min")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Slider(value: Binding(
-                                    get: { Double(totalDuration) },
-                                    set: { totalDuration = Int($0) }
-                                ), in: 1...120, step: 1) {
-                                    Text("Total Duration")
-                                } minimumValueLabel: {
-                                    Image(systemName: "clock")
-                                } maximumValueLabel: {
-                                    Image(systemName: "clock.fill")
-                                }
-                                
-                                HStack {
-                                    Text("Exercise Duration")
-                                        .font(.subheadline)
-                                    Spacer()
-                                    Text("\(exerciseDuration) sec")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Slider(value: Binding(
-                                    get: { Double(exerciseDuration) },
-                                    set: { exerciseDuration = Int($0) }
-                                ), in: 1...120, step: 1) {
-                                    Text("Exercise Duration")
-                                } minimumValueLabel: {
-                                    Image(systemName: "timer")
-                                } maximumValueLabel: {
-                                    Image(systemName: "timer")
-                                }
-                                
-                                HStack {
-                                    Text("Rest Duration")
-                                        .font(.subheadline)
-                                    Spacer()
-                                    Text("\(restDuration) sec")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Slider(value: Binding(
-                                    get: { Double(restDuration) },
-                                    set: { restDuration = Int($0) }
-                                ), in: 1...120, step: 1) {
-                                    Text("Rest Duration")
-                                } minimumValueLabel: {
-                                    Image(systemName: "pause")
-                                } maximumValueLabel: {
-                                    Image(systemName: "pause.fill")
-                                }
-                                
-                                HStack {
-                                    Text("Rest Every Nth Exercises")
-                                        .font(.subheadline)
-                                    Spacer()
-                                    Text("\(restEvery)")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Slider(value: Binding(
-                                    get: { Double(restEvery) },
-                                    set: { restEvery = Int($0) }
-                                ), in: 1...20, step: 1) {
-                                    Text("Rest Every Nth Exercises")
-                                } minimumValueLabel: {
-                                    Image(systemName: "1.circle")
-                                } maximumValueLabel: {
-                                    Image(systemName: "20.circle.fill")
+                        // Durations — preset chips
+                        if timerStyle == .standard || timerStyle == .pyramid {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Durations")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+
+                                VStack(alignment: .leading, spacing: 14) {
+                                    // Total Duration presets
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Total Duration")
+                                            .font(.subheadline)
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 8) {
+                                                ForEach([5, 10, 20, 30, 45, 60, 90], id: \.self) { preset in
+                                                    Button { totalDuration = preset } label: {
+                                                        Text("\(preset) min")
+                                                            .font(.subheadline)
+                                                            .padding(.horizontal, 14)
+                                                            .padding(.vertical, 8)
+                                                            .background(totalDuration == preset ? Color.blue : Color.gray.opacity(0.12))
+                                                            .foregroundStyle(totalDuration == preset ? .white : .primary)
+                                                            .clipShape(Capsule())
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                }
+                                            }
+                                            .padding(.horizontal, 2)
+                                        }
+                                    }
+
+                                    if timerStyle == .standard {
+                                        // Exercise Duration presets
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text("Exercise Duration")
+                                                .font(.subheadline)
+                                            HStack(spacing: 8) {
+                                                ForEach([20, 30, 45, 60], id: \.self) { preset in
+                                                    Button { exerciseDuration = preset } label: {
+                                                        Text("\(preset)s")
+                                                            .font(.subheadline)
+                                                            .padding(.horizontal, 16)
+                                                            .padding(.vertical, 8)
+                                                            .background(exerciseDuration == preset ? Color.blue : Color.gray.opacity(0.12))
+                                                            .foregroundStyle(exerciseDuration == preset ? .white : .primary)
+                                                            .clipShape(Capsule())
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                }
+                                                Spacer()
+                                            }
+                                        }
+
+                                        // Rest Duration presets
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text("Rest Duration")
+                                                .font(.subheadline)
+                                            HStack(spacing: 8) {
+                                                ForEach([10, 15, 30, 60], id: \.self) { preset in
+                                                    Button { restDuration = preset } label: {
+                                                        Text("\(preset)s")
+                                                            .font(.subheadline)
+                                                            .padding(.horizontal, 16)
+                                                            .padding(.vertical, 8)
+                                                            .background(restDuration == preset ? Color.blue : Color.gray.opacity(0.12))
+                                                            .foregroundStyle(restDuration == preset ? .white : .primary)
+                                                            .clipShape(Capsule())
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                }
+                                                Spacer()
+                                            }
+                                        }
+
+                                        // Rest Frequency — exercises per circuit before rest
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            HStack {
+                                                Text("Rest Frequency")
+                                                    .font(.subheadline)
+                                                Spacer()
+                                                Text(restEvery == 1 ? "After each" : "Every \(restEvery)")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            HStack(spacing: 8) {
+                                                ForEach([1, 2, 3, 4, 5], id: \.self) { n in
+                                                    Button { restEvery = n } label: {
+                                                        Text("\(n)")
+                                                            .font(.subheadline)
+                                                            .fontWeight(.medium)
+                                                            .frame(width: 44, height: 36)
+                                                            .background(restEvery == n ? Color.blue : Color.gray.opacity(0.12))
+                                                            .foregroundStyle(restEvery == n ? .white : .primary)
+                                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                }
+                                                Spacer()
+                                            }
+                                            Text("Exercises before each rest break")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
                                 }
                             }
                         }
-                        } // end if timerStyle == .standard
+
+                        // Advanced only: Repeating Blocks config, Feedback, Video Options
+                        if useAdvancedView {
+
+                        // Repeating Blocks Configuration
+                        if timerStyle == .blocks {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Block Configuration")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+
+                                VStack(spacing: 15) {
+                                    // Number of blocks
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Number of Blocks")
+                                            .font(.subheadline)
+                                        HStack(spacing: 16) {
+                                            ForEach([2, 3, 4], id: \.self) { n in
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: blocksCount == n ? "circle.fill" : "circle")
+                                                        .foregroundStyle(blocksCount == n ? .blue : .secondary)
+                                                    Text("\(n)")
+                                                        .font(.subheadline)
+                                                }
+                                                .contentShape(Rectangle())
+                                                .onTapGesture {
+                                                    let presets = [30, 40, 50, 60]
+                                                    blocksCount = n
+                                                    blockDurations = (0..<n).map { i in
+                                                        blockDurations.indices.contains(i) ? blockDurations[i] : presets[i % presets.count]
+                                                    }
+                                                    clampBlocksTotalSets()
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Exercises per block
+                                    HStack {
+                                        Text("Exercises per Block")
+                                            .font(.subheadline)
+                                        Spacer()
+                                        Stepper(value: $exercisesPerBlock, in: 2...5) {
+                                            EmptyView()
+                                        }
+                                        .labelsHidden()
+                                        .onChange(of: exercisesPerBlock) { _, _ in clampBlocksTotalSets() }
+                                        Text("\(exercisesPerBlock)")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .frame(minWidth: 24, alignment: .trailing)
+                                    }
+
+                                    // Per-block work durations
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Work Duration per Block (rest = same)")
+                                            .font(.subheadline)
+                                        let durationPresets = [20, 25, 30, 35, 40, 45, 50, 60]
+                                        ForEach(0..<blocksCount, id: \.self) { i in
+                                            HStack {
+                                                Text("Block \(i + 1)")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .frame(width: 55, alignment: .leading)
+                                                Picker("Block \(i + 1)", selection: Binding(
+                                                    get: { blockDurations.indices.contains(i) ? blockDurations[i] : 30 },
+                                                    set: { newVal in
+                                                        var updated = blockDurations
+                                                        if updated.indices.contains(i) { updated[i] = newVal }
+                                                        blockDurations = updated
+                                                        clampBlocksTotalSets()
+                                                    }
+                                                )) {
+                                                    ForEach(durationPresets, id: \.self) { s in
+                                                        Text("\(s)s").tag(s)
+                                                    }
+                                                }
+                                                .pickerStyle(.segmented)
+                                            }
+                                        }
+                                    }
+
+                                    // Total workout picker
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack {
+                                            Text("Total Workout")
+                                                .font(.subheadline)
+                                            Spacer()
+                                            Text(formatBlockTime(blocksTotalSeconds))
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Picker("Total Workout", selection: $blocksTotalSets) {
+                                            ForEach(blocksAvailableTotalSets, id: \.self) { n in
+                                                Text("\(n)× cycle · \(formatBlockTime(n * blocksSuperSetSeconds))")
+                                                    .tag(n)
+                                            }
+                                        }
+                                        #if os(iOS)
+                                        .pickerStyle(.wheel)
+                                        .frame(height: 100)
+                                        #endif
+                                    }
+                                }
+                            }
+                        }
 
                         // Feedback Settings
                         VStack(alignment: .leading, spacing: 12) {
@@ -533,6 +927,8 @@ struct WorkoutGeneratorView: View {
                             }
                         }
                         
+                        } // end if useAdvancedView
+
                         // Generate Button
                         Button {
                             generateWorkout()
@@ -645,6 +1041,31 @@ struct WorkoutGeneratorView: View {
                 }
             }
             .navigationTitle("Workout Generator")
+            .toolbar {
+#if os(iOS) || os(visionOS)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { useAdvancedView.toggle() }
+                    } label: {
+                        Label(useAdvancedView ? "Basic" : "Advanced",
+                              systemImage: useAdvancedView ? "slider.horizontal.below.square.and.square.filled" : "slider.horizontal.3")
+                            .labelStyle(.iconOnly)
+                    }
+                }
+#else
+                ToolbarItem {
+                    Button { withAnimation { useAdvancedView.toggle() } } label: {
+                        Label(useAdvancedView ? "Basic" : "Advanced",
+                              systemImage: useAdvancedView ? "slider.horizontal.below.square.and.square.filled" : "slider.horizontal.3")
+                    }
+                }
+#endif
+            }
+        }
+        .onChange(of: useAdvancedView) { _, newValue in
+            if !newValue && timerStyle != .standard {
+                timerStyle = .standard
+            }
         }
         .sheet(isPresented: $showingWorkout) {
             WorkoutPlayerView(
@@ -653,10 +1074,15 @@ struct WorkoutGeneratorView: View {
                 restDuration: restDuration,
                 restEvery: restEvery,
                 timerStyle: timerStyle,
+                intention: selectedIntention,
+                blocksConfig: timerStyle == .blocks ? RepeatingBlocksConfig(exercisesPerBlock: exercisesPerBlock, blockDurations: blockDurations) : nil,
                 enableSound_iOS_tv_vision: enableSound_iOS_tv_vision,
                 enableHaptics_iOS_vision: enableHaptics_iOS_vision,
                 enableSound_macOS: enableSound_macOS
             )
+        }
+        .sheet(isPresented: $showingTutorial) {
+            TutorialView()
         }
         .fileExporter(
             isPresented: $showingExporter,
@@ -702,6 +1128,9 @@ struct WorkoutGeneratorView: View {
         .onAppear {
             if !videoManager.didPromptForVideoMode {
                 showVideoModePrompt = true
+            }
+            if !hasSeenTutorial {
+                showingTutorial = true
             }
         }
         .task {
@@ -801,11 +1230,16 @@ struct WorkoutGeneratorView: View {
                 return
             }
 
-            // Pyramid mode targets exactly 6 exercises (one per pyramid level)
+            // Compute target exercise count based on timer style
+            let pyramidCycleSecs = WorkoutPlayerView.pyramidIntervals.reduce(0) { $0 + $1.work + $1.rest }
             let maxExercises: Int
-            if timerStyle == .pyramid {
-                maxExercises = 6
-            } else {
+            switch timerStyle {
+            case .pyramid:
+                let cycles = max(1, Int(ceil(Double(totalDuration) * 60.0 / Double(pyramidCycleSecs))))
+                maxExercises = cycles * WorkoutPlayerView.pyramidIntervals.count
+            case .blocks:
+                maxExercises = blocksTotalSets * blocksCount * exercisesPerBlock
+            case .standard:
                 let fullCycle = Double(exerciseDuration) + (Double(restDuration) / Double(restEvery))
                 let totalSecs = Double(totalDuration) * 60
                 maxExercises = Int(ceil(totalSecs / fullCycle))
@@ -816,7 +1250,7 @@ struct WorkoutGeneratorView: View {
 
             // Build final routine with rests
             var routine: [Exercise] = []
-            if timerStyle == .pyramid {
+            if timerStyle == .pyramid || timerStyle == .blocks {
                 // Every exercise gets its own rest (except the last)
                 for (index, exercise) in selected.enumerated() {
                     routine.append(exercise)
@@ -938,6 +1372,8 @@ struct WorkoutPlayerView: View {
     let restDuration: Int
     let restEvery: Int
     let timerStyle: TimerStyle
+    let intention: WorkoutIntention
+    let blocksConfig: RepeatingBlocksConfig?
     let enableSound_iOS_tv_vision: Bool
     let enableHaptics_iOS_vision: Bool
     let enableSound_macOS: Bool
@@ -959,6 +1395,10 @@ struct WorkoutPlayerView: View {
     @State private var peakHeartRate: Double = 0
     @State private var heartRateSamples: [Double] = []
     @State private var showingRecap = false
+    // HR intention banner
+    @State private var intentionBannerText: String? = nil
+    @State private var intentionBannerTask: Task<Void, Never>? = nil
+    @State private var lastBannerExerciseTime: Int = -1
 #if canImport(AVFoundation)
     @State private var audioEngine: AVAudioEngine?
     @State private var playerNode: AVAudioPlayerNode?
@@ -1008,6 +1448,14 @@ struct WorkoutPlayerView: View {
         if timerStyle == .pyramid {
             let interval = Self.pyramidIntervals[currentPyramidPhase]
             return exercise.name == "Rest" ? interval.rest : interval.work
+        }
+        if timerStyle == .blocks, let config = blocksConfig {
+            let workBefore = routine[0..<min(currentIndex, routine.count)].filter { $0.name != "Rest" }.count
+            let exercisePos = isRest ? max(0, workBefore - 1) : workBefore
+            let superSetSize = config.blockDurations.count * config.exercisesPerBlock
+            let posInSuperSet = exercisePos % max(1, superSetSize)
+            let blockIdx = min(posInSuperSet / max(1, config.exercisesPerBlock), config.blockDurations.count - 1)
+            return config.blockDurations[blockIdx]
         }
         return exercise.name == "Rest" ? restDuration : exerciseDuration
     }
@@ -1105,11 +1553,12 @@ struct WorkoutPlayerView: View {
                             WorkoutLiveStatsView(
                                 exerciseTime: totalExerciseTime,
                                 heartRate: connectivityManager.heartRate,
-                                hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0
+                                hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
+                                intention: intention
                             )
                             .padding(.top, 4)
                             #else
-                            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false)
+                            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false, intention: intention)
                                 .padding(.top, 4)
                             #endif
                         }
@@ -1127,6 +1576,19 @@ struct WorkoutPlayerView: View {
                             let phase = currentPyramidPhase
                             let interval = WorkoutPlayerView.pyramidIntervals[phase]
                             Text("Pyramid \(phase + 1) of \(WorkoutPlayerView.pyramidIntervals.count)  •  \(isRest ? interval.rest : interval.work)s")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        // Blocks progress indicator
+                        if timerStyle == .blocks && isPlaying, let config = blocksConfig {
+                            let workBefore = routine[0..<min(currentIndex, routine.count)].filter { $0.name != "Rest" }.count
+                            let exercisePos = isRest ? max(0, workBefore - 1) : workBefore
+                            let superSetSize = config.blockDurations.count * config.exercisesPerBlock
+                            let posInSuperSet = exercisePos % max(1, superSetSize)
+                            let blockIdx = min(posInSuperSet / max(1, config.exercisesPerBlock), config.blockDurations.count - 1)
+                            let setNum = exercisePos / max(1, superSetSize) + 1
+                            Text("Block \(blockIdx + 1) of \(config.blockDurations.count)  •  Set \(setNum)  •  \(config.blockDurations[blockIdx])s")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1213,6 +1675,15 @@ struct WorkoutPlayerView: View {
                 }
 #endif
             }
+            .overlay(alignment: .top) {
+                if let msg = intentionBannerText {
+                    IntentionBannerView(message: msg, color: intention.bannerColor)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .padding(.top, 8)
+                        .padding(.horizontal, 16)
+                }
+            }
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: intentionBannerText)
 #if os(macOS)
             .frame(minWidth: 800, minHeight: 600)
 #endif
@@ -1543,11 +2014,19 @@ struct WorkoutPlayerView: View {
             // properties from the Sendable Timer closure directly.
             #if os(iOS)
             let currentTime = timeRemaining
+            let currentExerciseTime = totalExerciseTime
             Task { @MainActor in
                 let hr = connectivityManager.heartRate
                 if hr > 0 {
                     heartRateSamples.append(hr)
                     if hr > peakHeartRate { peakHeartRate = hr }
+                    // Check HR/intention alignment every 30 seconds during exercise
+                    if !isRest && currentExerciseTime > 0
+                        && currentExerciseTime % 30 == 0
+                        && currentExerciseTime != lastBannerExerciseTime {
+                        lastBannerExerciseTime = currentExerciseTime
+                        showIntentionBannerIfNeeded(hr: hr)
+                    }
                 }
                 connectivityManager.sendTimerUpdate(timeRemaining: currentTime)
             }
@@ -1616,9 +2095,71 @@ struct WorkoutPlayerView: View {
 #endif
         timer?.invalidate()
         timer = nil
+        intentionBannerTask?.cancel()
         #if os(iOS)
         connectivityManager.sendControlMessage(.workoutStopped)
         #endif
+    }
+
+    private func hrZoneName(bpm: Double) -> String {
+        switch bpm {
+        case ..<100:   return "Zone 1"
+        case 100..<130: return "Zone 2"
+        case 130..<150: return "Zone 3"
+        case 150..<165: return "Zone 4"
+        default:        return "Zone 5"
+        }
+    }
+
+    private func intentionMismatchMessage(hr: Double) -> String? {
+        let zone = hrZoneName(bpm: hr)
+        switch (intention, zone) {
+        case (.fatBurn, "Zone 4"), (.fatBurn, "Zone 5"):
+            return "It's okay to ease up — you're burning more carbs than fat right now"
+        case (.fatBurn, "Zone 1"):
+            return "Try picking up the pace to reach your fat-burn zone"
+        case (.cardioEndurance, "Zone 1"):
+            return "Push a little harder to build your aerobic base"
+        case (.cardioEndurance, "Zone 2") where hr < 110:
+            return "A bit more effort will grow your aerobic capacity"
+        case (.strengthPower, "Zone 5"):
+            return "Great power output — give yourself a solid rest before the next set"
+        default:
+            return nil
+        }
+    }
+
+    private func showIntentionBannerIfNeeded(hr: Double) {
+        guard let message = intentionMismatchMessage(hr: hr) else { return }
+        intentionBannerTask?.cancel()
+        withAnimation { intentionBannerText = message }
+        intentionBannerTask = Task {
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation { intentionBannerText = nil }
+        }
+    }
+}
+
+private struct IntentionBannerView: View {
+    let message: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "heart.fill")
+                .foregroundStyle(color)
+            Text(message)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
     }
 }
 // MARK: - Array Unique Extension
@@ -1634,6 +2175,9 @@ struct WorkoutLiveStatsView: View {
     let exerciseTime: Int
     let heartRate: Double
     let hasWatchData: Bool
+    let intention: WorkoutIntention
+
+    @State private var showingZonePopover = false
 
     private var hrInfo: (zone: String, color: Color, nutrient: String) {
         switch heartRate {
@@ -1644,6 +2188,14 @@ struct WorkoutLiveStatsView: View {
         default:        return ("Zone 5", .purple, "Peak Effort")
         }
     }
+
+    private static let zoneDetails: [String: (bpmRange: String, description: String)] = [
+        "Zone 1": (bpmRange: "< 100 BPM",    description: "Very light. Active recovery."),
+        "Zone 2": (bpmRange: "100–130 BPM",  description: "Light aerobic. Optimal fat oxidation."),
+        "Zone 3": (bpmRange: "130–150 BPM",  description: "Moderate aerobic. Mixed carb/fat fuel."),
+        "Zone 4": (bpmRange: "150–165 BPM",  description: "High intensity. Lactate threshold zone."),
+        "Zone 5": (bpmRange: "165+ BPM",     description: "Maximum effort. Anaerobic capacity."),
+    ]
 
     var body: some View {
         HStack(spacing: 16) {
@@ -1660,17 +2212,32 @@ struct WorkoutLiveStatsView: View {
 
             if hasWatchData {
                 Divider().frame(height: 40)
-                VStack(spacing: 2) {
-                    Image(systemName: "waveform.path.ecg")
-                        .foregroundStyle(hrInfo.color)
-                    Text(hrInfo.zone)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(hrInfo.color)
-                    Text("HR Zone")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+
+                Button {
+                    showingZonePopover = true
+                } label: {
+                    VStack(spacing: 2) {
+                        HStack(spacing: 3) {
+                            Image(systemName: "waveform.path.ecg")
+                                .foregroundStyle(hrInfo.color)
+                            Image(systemName: "info.circle")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text(hrInfo.zone)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(hrInfo.color)
+                        Text("HR Zone")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showingZonePopover) {
+                    HRZonePopoverView(zone: hrInfo.zone, color: hrInfo.color, intention: intention)
+                }
+
                 Divider().frame(height: 40)
                 VStack(spacing: 2) {
                     Image(systemName: "bolt.fill")
@@ -1692,6 +2259,54 @@ struct WorkoutLiveStatsView: View {
 
     private func formattedTime(_ seconds: Int) -> String {
         String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+private struct HRZonePopoverView: View {
+    let zone: String
+    let color: Color
+    let intention: WorkoutIntention
+
+    private static let details: [String: (bpmRange: String, description: String)] = [
+        "Zone 1": (bpmRange: "< 100 BPM",    description: "Very light. Active recovery."),
+        "Zone 2": (bpmRange: "100–130 BPM",  description: "Light aerobic. Optimal fat oxidation."),
+        "Zone 3": (bpmRange: "130–150 BPM",  description: "Moderate aerobic. Mixed carb/fat fuel."),
+        "Zone 4": (bpmRange: "150–165 BPM",  description: "High intensity. Lactate threshold zone."),
+        "Zone 5": (bpmRange: "165+ BPM",     description: "Maximum effort. Anaerobic capacity."),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(zone)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundStyle(color)
+                Spacer()
+                if let d = Self.details[zone] {
+                    Text(d.bpmRange)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let d = Self.details[zone] {
+                Text(d.description)
+                    .font(.subheadline)
+            }
+            Divider()
+            HStack(spacing: 6) {
+                Image(systemName: intention.icon)
+                    .foregroundStyle(color)
+                Text(intention.rawValue)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+            }
+            Text(intention.tip(for: zone))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(minWidth: 240, maxWidth: 300)
     }
 }
 
@@ -1937,6 +2552,133 @@ struct AddExerciseView: View {
             .onAppear {
                 if selectedFocus.isEmpty { selectedFocus = focusAreas.first ?? "" }
             }
+        }
+    }
+}
+
+// MARK: - TutorialView
+
+struct TutorialView: View {
+    @AppStorage("hasSeenTutorial") private var hasSeenTutorial = false
+    @State private var page = 0
+    @Environment(\.dismiss) private var dismiss
+
+    private struct TutorialPage {
+        let title: String
+        let body: String
+        let icon: String
+        let color: Color
+    }
+
+    private let pages: [TutorialPage] = [
+        TutorialPage(title: "Welcome!", body: "Generate custom bodyweight workouts tailored to your focus areas, difficulty level, and available equipment.", icon: "figure.run", color: .blue),
+        TutorialPage(title: "Focus & Equipment", body: "Choose which muscle groups to target and what equipment you have on hand. Use 'Select All' to toggle everything at once.", icon: "checkmark.square.fill", color: .purple),
+        TutorialPage(title: "Stretch Routine", body: "The Stretch Routine section is completely separate from regular workouts. Set hold duration, reps per stretch, and choose your categories — no cardio-style rest intervals.", icon: "figure.cooldown", color: .teal),
+        TutorialPage(title: "Set Your Intention", body: "Tell the app your goal — Fat Burn, Cardio Endurance, Strength, or General Fitness. During workouts, tap your HR Zone for personalized zone tips.", icon: "flame", color: .orange),
+        TutorialPage(title: "Apple Watch", body: "Pair your Apple Watch to see live heart rate, HR zone, and calorie data. A full recap is shown after each workout.", icon: "applewatch", color: .red),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+#if os(macOS)
+                pageContent(for: page)
+                    .id(page)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if page < pages.count - 1 {
+                            withAnimation(.easeInOut(duration: 0.3)) { page += 1 }
+                        }
+                    }
+#else
+                TabView(selection: $page) {
+                    ForEach(Array(pages.enumerated()), id: \.offset) { index, _ in
+                        pageContent(for: index)
+                            .tag(index)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+#endif
+                HStack(spacing: 16) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { page -= 1 }
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.body.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(page == 0)
+                    .opacity(page == 0 ? 0.25 : 1)
+
+                    HStack(spacing: 8) {
+                        ForEach(0..<pages.count, id: \.self) { i in
+                            Capsule()
+                                .fill(i == page ? Color.primary : Color.secondary.opacity(0.25))
+                                .frame(width: 24, height: 4)
+                                .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { page = i } }
+                        }
+                    }
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { page += 1 }
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.body.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(page == pages.count - 1)
+                    .opacity(page == pages.count - 1 ? 0.25 : 1)
+                }
+                .padding(.bottom, 20)
+            }
+            .navigationTitle("Welcome to WorkoutRandomizer")
+#if os(iOS) || os(visionOS)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Skip") { hasSeenTutorial = true; dismiss() }
+                }
+            }
+#else
+            .toolbar {
+                ToolbarItem { Button("Skip") { hasSeenTutorial = true; dismiss() } }
+            }
+#endif
+        }
+    }
+
+    @ViewBuilder
+    private func pageContent(for index: Int) -> some View {
+        let p = pages[index]
+        VStack(spacing: 28) {
+            Spacer()
+            Image(systemName: p.icon)
+                .font(.system(size: 72))
+                .foregroundStyle(p.color)
+            Text(p.title)
+                .font(.title)
+                .fontWeight(.bold)
+            Text(p.body)
+                .font(.body)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 32)
+            Spacer()
+            if index == pages.count - 1 {
+                Button("Get Started") {
+                    hasSeenTutorial = true
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(p.color)
+                .controlSize(.large)
+            }
+            Spacer(minLength: 50)
         }
     }
 }
