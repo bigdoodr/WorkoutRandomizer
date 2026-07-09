@@ -91,28 +91,56 @@ struct WorkoutWatchView: View {
                         .padding(.top, 8)
                     }
                     
+                } else if connectivityManager.isReadyToStart {
+                    // iPhone is waiting — show Start button on watch
+                    VStack(spacing: 16) {
+                        Image(systemName: "figure.run")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.green)
+
+                        Text("Ready to Start")
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+
+                        Text("Tap Start to begin and track your fitness")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        Button {
+                            connectivityManager.sendRequestStart()
+                        } label: {
+                            Label("Start Workout", systemImage: "play.fill")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                        .padding(.top, 4)
+                    }
+                    .padding()
                 } else {
                     // No workout active
                     VStack(spacing: 16) {
                         Image(systemName: "applewatch")
                             .font(.system(size: 48))
                             .foregroundStyle(.secondary)
-                        
+
                         Text("No Active Workout")
                             .font(.headline)
                             .multilineTextAlignment(.center)
-                        
+
                         Text("Start a workout on your iPhone")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
-                        
+
                         if !connectivityManager.isWatchConnected {
                             Label("Connecting...", systemImage: "arrow.triangle.2.circlepath")
                                 .font(.caption2)
                                 .foregroundStyle(.orange)
                         }
-                        
+
                         // Show end button even if connectivity was lost but HealthKit session is still running
                         if sessionManager.isWorkoutActive {
                             Button(role: .destructive) {

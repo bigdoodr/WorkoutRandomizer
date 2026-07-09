@@ -17,6 +17,8 @@ class WorkoutConnectivityManager: NSObject, ObservableObject {
     @Published var isWatchConnected = false
     /// Set to true when a new workout state arrives and fitness tracking hasn't started yet
     @Published var shouldPromptToStartTracking = false
+    /// Set to true when iPhone sends a prepareToStart signal; shows Start button on watch
+    @Published var isReadyToStart = false
 
     private let session: WCSession? = WCSession.isSupported() ? WCSession.default : nil
 
@@ -24,6 +26,13 @@ class WorkoutConnectivityManager: NSObject, ObservableObject {
         super.init()
         session?.delegate = self
         session?.activate()
+    }
+
+    func sendRequestStart() {
+        guard let session = session, session.isReachable else { return }
+        isReadyToStart = false
+        let message: [String: Any] = ["type": "requestStart"]
+        session.sendMessage(message, replyHandler: nil)
     }
 }
 
@@ -98,8 +107,21 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
                     self.handleControl(control)
                 }
 
+            // --- Handoff: iPhone ready for watch to start ---
+            case "prepareToStart":
+                self.isReadyToStart = true
+
             default:
                 break
+            }
+        }
+    }
+
+    // Queued delivery when watch app was not in foreground
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String : Any] = [:]) {
+        if let type = userInfo["type"] as? String, type == "prepareToStart" {
+            DispatchQueue.main.async {
+                self.isReadyToStart = true
             }
         }
     }

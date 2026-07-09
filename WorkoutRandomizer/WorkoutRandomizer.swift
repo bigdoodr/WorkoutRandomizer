@@ -280,6 +280,10 @@ struct WorkoutGeneratorView: View {
     @AppStorage("useAdvancedView") private var useAdvancedView = false
     @State private var showingTutorial = false
     @State private var customExerciseStore = CustomExerciseStore.shared
+#if os(iOS)
+    @State private var showingWatchHandoff = false
+    @State private var startWorkoutAfterHandoff = false
+#endif
 
     @StateObject private var videoManager = VideoManager.shared
     @State private var catalog = ExerciseCatalog.shared
@@ -989,7 +993,11 @@ struct WorkoutGeneratorView: View {
                                 
                                 HStack(spacing: 12) {
                                     Button {
+#if os(iOS)
+                                        showingWatchHandoff = true
+#else
                                         showingWorkout = true
+#endif
                                     } label: {
                                         HStack {
                                             Image(systemName: "play.fill")
@@ -1081,6 +1089,18 @@ struct WorkoutGeneratorView: View {
                 enableSound_macOS: enableSound_macOS
             )
         }
+#if os(iOS)
+        .sheet(isPresented: $showingWatchHandoff, onDismiss: {
+            if startWorkoutAfterHandoff {
+                startWorkoutAfterHandoff = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    showingWorkout = true
+                }
+            }
+        }) {
+            WatchHandoffView { startWorkoutAfterHandoff = true }
+        }
+#endif
         .sheet(isPresented: $showingTutorial) {
             TutorialView()
         }
@@ -1399,6 +1419,7 @@ struct WorkoutPlayerView: View {
     @State private var intentionBannerText: String? = nil
     @State private var intentionBannerTask: Task<Void, Never>? = nil
     @State private var lastBannerExerciseTime: Int = -1
+    @State private var userMaxHeartRate: Double = 185 // default: age 35
 #if canImport(AVFoundation)
     @State private var audioEngine: AVAudioEngine?
     @State private var playerNode: AVAudioPlayerNode?
@@ -1554,11 +1575,12 @@ struct WorkoutPlayerView: View {
                                 exerciseTime: totalExerciseTime,
                                 heartRate: connectivityManager.heartRate,
                                 hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
-                                intention: intention
+                                intention: intention,
+                                maxHeartRate: userMaxHeartRate
                             )
                             .padding(.top, 4)
                             #else
-                            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false, intention: intention)
+                            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false, intention: intention, maxHeartRate: 185)
                                 .padding(.top, 4)
                             #endif
                         }
@@ -1694,6 +1716,9 @@ struct WorkoutPlayerView: View {
                 timeRemaining = durationForCurrentPosition
             }
             prepareVideoForCurrentExercise(autoplay: false)
+            #if canImport(HealthKit)
+            fetchUserMaxHeartRate()
+            #endif
         }
         .onDisappear {
             stopWorkout()
@@ -2101,18 +2126,37 @@ struct WorkoutPlayerView: View {
         #endif
     }
 
-    private func hrZoneName(bpm: Double) -> String {
-        switch bpm {
-        case ..<100:   return "Zone 1"
-        case 100..<130: return "Zone 2"
-        case 130..<150: return "Zone 3"
-        case 150..<165: return "Zone 4"
-        default:        return "Zone 5"
+    #if canImport(HealthKit)
+    private func fetchUserMaxHeartRate() {
+        let healthStore = HKHealthStore()
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        do {
+            let components = try healthStore.dateOfBirthComponents()
+            if let year = components.year {
+                let age = Calendar.current.component(.year, from: Date()) - year
+                if age > 10 && age < 120 {
+                    userMaxHeartRate = 220.0 - Double(age)
+                }
+            }
+        } catch {
+            // Keep the default (assumes age 35)
+        }
+    }
+    #endif
+
+    private func hrZoneName(bpm: Double, maxHR: Double) -> String {
+        let pct = bpm / maxHR
+        switch pct {
+        case ..<0.60:       return "Zone 1"
+        case 0.60..<0.70:   return "Zone 2"
+        case 0.70..<0.80:   return "Zone 3"
+        case 0.80..<0.90:   return "Zone 4"
+        default:             return "Zone 5"
         }
     }
 
     private func intentionMismatchMessage(hr: Double) -> String? {
-        let zone = hrZoneName(bpm: hr)
+        let zone = hrZoneName(bpm: hr, maxHR: userMaxHeartRate)
         switch (intention, zone) {
         case (.fatBurn, "Zone 4"), (.fatBurn, "Zone 5"):
             return "It's okay to ease up — you're burning more carbs than fat right now"
@@ -2176,26 +2220,34 @@ struct WorkoutLiveStatsView: View {
     let heartRate: Double
     let hasWatchData: Bool
     let intention: WorkoutIntention
+    let maxHeartRate: Double
 
     @State private var showingZonePopover = false
 
     private var hrInfo: (zone: String, color: Color, nutrient: String) {
-        switch heartRate {
-        case ..<100: return ("Zone 1", .green, "Fat Burn (Max)")
-        case 100..<130: return ("Zone 2", .yellow, "Fat Burn")
-        case 130..<150: return ("Zone 3", .orange, "Mixed")
-        case 150..<165: return ("Zone 4", .red, "Carb Burn")
-        default:        return ("Zone 5", .purple, "Peak Effort")
+        let pct = heartRate / maxHeartRate
+        switch pct {
+        case ..<0.60:       return ("Zone 1", .green, "Active Recovery")
+        case 0.60..<0.70:   return ("Zone 2", .yellow, "Fat Burn")
+        case 0.70..<0.80:   return ("Zone 3", .orange, "Mixed")
+        case 0.80..<0.90:   return ("Zone 4", .red, "Carb Burn")
+        default:             return ("Zone 5", .purple, "Peak Effort")
         }
     }
 
-    private static let zoneDetails: [String: (bpmRange: String, description: String)] = [
-        "Zone 1": (bpmRange: "< 100 BPM",    description: "Very light. Active recovery."),
-        "Zone 2": (bpmRange: "100–130 BPM",  description: "Light aerobic. Optimal fat oxidation."),
-        "Zone 3": (bpmRange: "130–150 BPM",  description: "Moderate aerobic. Mixed carb/fat fuel."),
-        "Zone 4": (bpmRange: "150–165 BPM",  description: "High intensity. Lactate threshold zone."),
-        "Zone 5": (bpmRange: "165+ BPM",     description: "Maximum effort. Anaerobic capacity."),
-    ]
+    private var zoneDetails: [String: (bpmRange: String, description: String)] {
+        let z1 = Int(maxHeartRate * 0.60)
+        let z2 = Int(maxHeartRate * 0.70)
+        let z3 = Int(maxHeartRate * 0.80)
+        let z4 = Int(maxHeartRate * 0.90)
+        return [
+            "Zone 1": (bpmRange: "< \(z1) BPM",        description: "Very light. Active recovery."),
+            "Zone 2": (bpmRange: "\(z1)–\(z2) BPM",   description: "Light aerobic. Optimal fat oxidation."),
+            "Zone 3": (bpmRange: "\(z2)–\(z3) BPM",   description: "Moderate aerobic. Mixed carb/fat fuel."),
+            "Zone 4": (bpmRange: "\(z3)–\(z4) BPM",   description: "High intensity. Lactate threshold zone."),
+            "Zone 5": (bpmRange: "\(z4)+ BPM",         description: "Maximum effort. Anaerobic capacity."),
+        ]
+    }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -2235,7 +2287,7 @@ struct WorkoutLiveStatsView: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showingZonePopover) {
-                    HRZonePopoverView(zone: hrInfo.zone, color: hrInfo.color, intention: intention)
+                    HRZonePopoverView(zone: hrInfo.zone, color: hrInfo.color, intention: intention, maxHeartRate: maxHeartRate)
                 }
 
                 Divider().frame(height: 40)
@@ -2266,14 +2318,21 @@ private struct HRZonePopoverView: View {
     let zone: String
     let color: Color
     let intention: WorkoutIntention
+    let maxHeartRate: Double
 
-    private static let details: [String: (bpmRange: String, description: String)] = [
-        "Zone 1": (bpmRange: "< 100 BPM",    description: "Very light. Active recovery."),
-        "Zone 2": (bpmRange: "100–130 BPM",  description: "Light aerobic. Optimal fat oxidation."),
-        "Zone 3": (bpmRange: "130–150 BPM",  description: "Moderate aerobic. Mixed carb/fat fuel."),
-        "Zone 4": (bpmRange: "150–165 BPM",  description: "High intensity. Lactate threshold zone."),
-        "Zone 5": (bpmRange: "165+ BPM",     description: "Maximum effort. Anaerobic capacity."),
-    ]
+    private var details: [String: (bpmRange: String, description: String)] {
+        let z1 = Int(maxHeartRate * 0.60)
+        let z2 = Int(maxHeartRate * 0.70)
+        let z3 = Int(maxHeartRate * 0.80)
+        let z4 = Int(maxHeartRate * 0.90)
+        return [
+            "Zone 1": (bpmRange: "< \(z1) BPM",        description: "Very light. Active recovery."),
+            "Zone 2": (bpmRange: "\(z1)–\(z2) BPM",   description: "Light aerobic. Optimal fat oxidation."),
+            "Zone 3": (bpmRange: "\(z2)–\(z3) BPM",   description: "Moderate aerobic. Mixed carb/fat fuel."),
+            "Zone 4": (bpmRange: "\(z3)–\(z4) BPM",   description: "High intensity. Lactate threshold zone."),
+            "Zone 5": (bpmRange: "\(z4)+ BPM",         description: "Maximum effort. Anaerobic capacity."),
+        ]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2283,13 +2342,13 @@ private struct HRZonePopoverView: View {
                     .fontWeight(.bold)
                     .foregroundStyle(color)
                 Spacer()
-                if let d = Self.details[zone] {
+                if let d = details[zone] {
                     Text(d.bpmRange)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
-            if let d = Self.details[zone] {
+            if let d = details[zone] {
                 Text(d.description)
                     .font(.subheadline)
             }
@@ -2400,7 +2459,7 @@ struct WorkoutRecapView: View {
     }
 }
 
-private struct RecapStatCard: View {
+struct RecapStatCard: View {
     let title: String
     let value: String
     let icon: String
@@ -2682,4 +2741,109 @@ struct TutorialView: View {
         }
     }
 }
+
+#if os(iOS)
+// MARK: - Watch Handoff Screen
+
+struct WatchHandoffView: View {
+    let onStart: () -> Void
+    @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var showPhoneOption = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 32) {
+                Spacer()
+
+                ZStack {
+                    Circle()
+                        .fill(connectivityManager.isWatchReachable
+                              ? Color.green.opacity(0.12)
+                              : Color.blue.opacity(0.12))
+                        .frame(width: 120, height: 120)
+                    Image(systemName: "applewatch")
+                        .font(.system(size: 56))
+                        .foregroundStyle(connectivityManager.isWatchReachable ? .green : .blue)
+                }
+                .animation(.easeInOut(duration: 0.4), value: connectivityManager.isWatchReachable)
+
+                VStack(spacing: 10) {
+                    if connectivityManager.isWatchReachable {
+                        Text("Apple Watch Found")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Text("Open the Workout Randomizer app on your Apple Watch and tap Start.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    } else {
+                        Text("Looking for Apple Watch…")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Text("Open the Workout Randomizer app on your Apple Watch to begin.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                }
+
+                ProgressView()
+                    .scaleEffect(1.5)
+
+                if showPhoneOption {
+                    VStack(spacing: 12) {
+                        Divider()
+                        Text("Watch app not responding")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            onStart()
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Image(systemName: "iphone")
+                                Text("Start on iPhone")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(.green)
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .padding(.horizontal)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+
+                Spacer()
+            }
+            .navigationTitle("Starting Workout")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .task {
+            connectivityManager.sendPrepareToStart()
+            try? await Task.sleep(for: .seconds(8))
+            withAnimation { showPhoneOption = true }
+        }
+        .onDisappear {
+            connectivityManager.watchRequestedStart = false
+        }
+        .onChange(of: connectivityManager.watchRequestedStart) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedStart = false
+                onStart()
+                dismiss()
+            }
+        }
+    }
+}
+#endif
 

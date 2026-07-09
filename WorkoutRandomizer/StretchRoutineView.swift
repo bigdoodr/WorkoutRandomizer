@@ -9,6 +9,7 @@ import AppKit
 // MARK: - Stretch Routine Setup
 
 struct StretchRoutineView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var catalog = ExerciseCatalog.shared
     @State private var selectedCategories: Set<String> = []
     @State private var holdDuration: Int = 45
@@ -18,6 +19,11 @@ struct StretchRoutineView: View {
     @State private var bothSidesMode: Bool = false
     @State private var generatedStretches: [Exercise] = []
     @State private var showingPlayer = false
+    @State private var completedStretchSession = false
+#if os(iOS)
+    @State private var showingWatchHandoff = false
+    @State private var startStretchAfterHandoff = false
+#endif
 
     private var stretchCategories: [String] {
         catalog.focusAreas.filter { area in
@@ -215,7 +221,11 @@ struct StretchRoutineView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
 
                         Button {
+#if os(iOS)
+                            showingWatchHandoff = true
+#else
                             showingPlayer = true
+#endif
                         } label: {
                             HStack {
                                 Image(systemName: "play.fill")
@@ -233,14 +243,32 @@ struct StretchRoutineView: View {
             .padding()
         }
         .navigationTitle("Stretch Routine")
-        .sheet(isPresented: $showingPlayer) {
+        .sheet(isPresented: $showingPlayer, onDismiss: {
+            if completedStretchSession {
+                completedStretchSession = false
+                dismiss()
+            }
+        }) {
             StretchPlayerView(
                 stretches: generatedStretches,
                 holdDuration: holdDuration,
                 repsPerStretch: repsPerStretch,
-                bothSidesMode: bothSidesMode
+                bothSidesMode: bothSidesMode,
+                onComplete: { completedStretchSession = true }
             )
         }
+#if os(iOS)
+        .sheet(isPresented: $showingWatchHandoff, onDismiss: {
+            if startStretchAfterHandoff {
+                startStretchAfterHandoff = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    showingPlayer = true
+                }
+            }
+        }) {
+            WatchHandoffView { startStretchAfterHandoff = true }
+        }
+#endif
         .onAppear {
             if selectedCategories.isEmpty, let first = stretchCategories.first {
                 selectedCategories = [first]
@@ -284,6 +312,7 @@ struct StretchPlayerView: View {
     let holdDuration: Int
     let repsPerStretch: Int
     let bothSidesMode: Bool
+    var onComplete: (() -> Void)? = nil
 
     @State private var currentIndex = 0
     @State private var currentRep = 1
@@ -293,7 +322,7 @@ struct StretchPlayerView: View {
     @State private var isPlaying = false
     @State private var isPaused = false
     @State private var timer: Timer?
-    @State private var showingComplete = false
+    @State private var showingRecap = false
     @Environment(\.dismiss) private var dismiss
 
     // Audio + Watch feedback
@@ -447,12 +476,18 @@ struct StretchPlayerView: View {
         }
         .onAppear { timeRemaining = holdDuration }
         .onDisappear { stopRoutine() }
-        .alert("Stretch Routine Complete!", isPresented: $showingComplete) {
-            Button("Done") { dismiss() }
-        } message: {
-            let count = stretches.count
-            let sideNote = bothSidesMode ? " (both sides)" : ""
-            Text("You completed \(count) stretch\(count == 1 ? "" : "es")\(sideNote). Great work!")
+        .sheet(isPresented: $showingRecap) {
+            StretchRecapView(
+                stretches: stretches,
+                holdDuration: holdDuration,
+                repsPerStretch: repsPerStretch,
+                bothSidesMode: bothSidesMode,
+                onDismiss: {
+                    onComplete?()
+                    showingRecap = false
+                    dismiss()
+                }
+            )
         }
     }
 
@@ -477,9 +512,13 @@ struct StretchPlayerView: View {
         timeRemaining = holdDuration
         startTimer()
         playFeedback(.start)
+        sendWorkoutStateToWatch()
     }
 
-    private func togglePause() { isPaused.toggle() }
+    private func togglePause() {
+        isPaused.toggle()
+        sendWorkoutStateToWatch()
+    }
 
     private func skipCurrent() { advance() }
 
@@ -497,6 +536,7 @@ struct StretchPlayerView: View {
             isTransitioning = false
             timeRemaining = holdDuration
             playFeedback(.start)
+            sendWorkoutStateToWatch()
             return
         }
 
@@ -519,13 +559,15 @@ struct StretchPlayerView: View {
             timer = nil
             isPlaying = false
             playFeedback(.complete)
-            showingComplete = true
+            sendControlToWatch(.workoutStopped)
+            showingRecap = true
             return
         }
 
         isTransitioning = true
         timeRemaining = Self.transitionDuration
         playFeedback(.start)
+        sendWorkoutStateToWatch()
     }
 
     private func startTimer() {
@@ -533,6 +575,8 @@ struct StretchPlayerView: View {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             guard !isPaused else { return }
             timeRemaining -= 1
+            let t = timeRemaining
+            Task { @MainActor in connectivityManager.sendTimerUpdate(timeRemaining: t) }
             if timeRemaining == 3 && !isTransitioning {
                 playFeedback(.warning)
             }
@@ -546,6 +590,7 @@ struct StretchPlayerView: View {
     private func stopRoutine() {
         timer?.invalidate()
         timer = nil
+        sendControlToWatch(.workoutStopped)
 #if canImport(AVFoundation)
         playerNode?.stop()
         audioEngine?.stop()
@@ -730,5 +775,117 @@ struct StretchPlayerView: View {
         }
         connectivityManager.sendFeedbackEvent(feedbackType)
         #endif
+    }
+
+    private func sendWorkoutStateToWatch() {
+        #if os(iOS)
+        let nextName: String? = (currentIndex + 1 < stretches.count) ? stretches[currentIndex + 1].name : nil
+        let state = WorkoutState(
+            currentExerciseName: isTransitioning ? "Get Ready" : (currentStretch?.name ?? "Complete"),
+            currentIndex: currentIndex,
+            totalExercises: stretches.count,
+            timeRemaining: timeRemaining,
+            isRest: isTransitioning,
+            nextExerciseName: isTransitioning ? currentStretch?.name : nextName,
+            isPlaying: isPlaying,
+            isPaused: isPaused
+        )
+        connectivityManager.sendWorkoutState(state)
+        #endif
+    }
+
+    private func sendControlToWatch(_ control: ControlMessage) {
+        #if os(iOS)
+        connectivityManager.sendControlMessage(control)
+        #endif
+    }
+}
+
+// MARK: - Stretch Recap
+
+struct StretchRecapView: View {
+    let stretches: [Exercise]
+    let holdDuration: Int
+    let repsPerStretch: Int
+    let bothSidesMode: Bool
+    let onDismiss: () -> Void
+
+    private var totalHoldSeconds: Int {
+        stretches.count * holdDuration * repsPerStretch * (bothSidesMode ? 2 : 1)
+    }
+    private var totalTimeSeconds: Int {
+        totalHoldSeconds + max(0, stretches.count - 1) * StretchPlayerView.transitionDuration
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    VStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 64))
+                            .foregroundStyle(.teal)
+                        Text("Stretch Complete!")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                    }
+                    .padding(.top, 8)
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                        RecapStatCard(title: "Total Time",  value: formatted(totalTimeSeconds), icon: "clock",               color: .blue)
+                        RecapStatCard(title: "Stretches",  value: "\(stretches.count)",        icon: "figure.cooldown",     color: .teal)
+                        RecapStatCard(title: "Hold / Side", value: "\(holdDuration)s",         icon: "timer",               color: .green)
+                        if repsPerStretch > 1 {
+                            RecapStatCard(title: "Reps",   value: "\(repsPerStretch)",         icon: "repeat",              color: .purple)
+                        }
+                        if bothSidesMode {
+                            RecapStatCard(title: "Both Sides", value: "Yes",                   icon: "arrow.left.arrow.right", color: .indigo)
+                        }
+                    }
+
+                    if !stretches.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Stretches Completed")
+                                .font(.headline)
+                            ForEach(Array(stretches.enumerated()), id: \.offset) { i, stretch in
+                                HStack {
+                                    Text("\(i + 1).")
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 28, alignment: .leading)
+                                    Text(stretch.name)
+                                        .font(.subheadline)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(.gray.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Recap")
+#if os(iOS) || os(visionOS)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { onDismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+#else
+            .toolbar {
+                ToolbarItem {
+                    Button("Done") { onDismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+#endif
+        }
+    }
+
+    private func formatted(_ seconds: Int) -> String {
+        String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }

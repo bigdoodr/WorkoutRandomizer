@@ -46,6 +46,8 @@ class WorkoutConnectivityManager: ObservableObject {
     static let shared = WorkoutConnectivityManager()
 
     @Published var isWatchConnected = false
+    @Published var isWatchReachable = false
+    @Published var watchRequestedStart = false
     @Published var heartRate: Double = 0
     @Published var activeCalories: Double = 0
     @Published var isWatchWorkoutActive = false
@@ -118,6 +120,18 @@ class WorkoutConnectivityManager: ObservableObject {
         session.sendMessage(message, replyHandler: nil)
     }
 
+    // MARK: - Watch handoff
+
+    func sendPrepareToStart() {
+        guard let session = session else { return }
+        let message: [String: Any] = ["type": "prepareToStart"]
+        if session.isReachable {
+            session.sendMessage(message, replyHandler: nil)
+        } else {
+            session.transferUserInfo(message)
+        }
+    }
+
     // MARK: - Receive health metrics from Watch
 
     nonisolated func receiveHealthMetrics(_ metrics: WatchHealthMetrics) {
@@ -137,9 +151,16 @@ private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
         Task { @MainActor in
             WorkoutConnectivityManager.shared.isWatchConnected = (activationState == .activated)
+            WorkoutConnectivityManager.shared.isWatchReachable = session.isReachable
         }
         if let error {
             print("WCSession activation failed: \(error.localizedDescription)")
+        }
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        Task { @MainActor in
+            WorkoutConnectivityManager.shared.isWatchReachable = session.isReachable
         }
     }
 
@@ -170,6 +191,10 @@ private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
                 } catch {
                     print("Failed to decode health metrics: \(error.localizedDescription)")
                 }
+            }
+        case "requestStart":
+            Task { @MainActor in
+                WorkoutConnectivityManager.shared.watchRequestedStart = true
             }
         default:
             break
