@@ -12,11 +12,10 @@ struct StretchRoutineView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var catalog = ExerciseCatalog.shared
     @State private var selectedCategories: Set<String> = []
-    @State private var holdDuration: Int = 45
-    @State private var repsPerStretch: Int = 1
+    @State private var holdDuration: Int = 20
     @State private var maxTotalMinutes: Int = 0   // 0 = no limit
     @State private var isOrdered: Bool = true
-    @State private var bothSidesMode: Bool = false
+    @State private var bothSidesMode: Bool = true
     @State private var generatedStretches: [Exercise] = []
     @State private var showingPlayer = false
     @State private var completedStretchSession = false
@@ -25,10 +24,39 @@ struct StretchRoutineView: View {
     @State private var startStretchAfterHandoff = false
 #endif
 
+    private let holdDurationOptions = [10, 15, 20, 30]
+
     private var stretchCategories: [String] {
         catalog.focusAreas.filter { area in
             ["Stretch", "Recovery", "Cool Down", "Warm-Up"].contains { area.contains($0) }
         }
+    }
+
+    private func categoryIcon(_ category: String) -> String {
+        if category.contains("Morning") { return "sunrise.fill" }
+        if category.contains("Evening") { return "moon.stars.fill" }
+        if category.contains("Cool Down") { return "figure.cooldown" }
+        if category.contains("Hips") { return "figure.flexibility" }
+        if category.contains("Full Body") { return "figure.run" }
+        return "figure.cooldown"
+    }
+
+    private func categoryColor(_ category: String) -> Color {
+        if category.contains("Morning") { return .yellow }
+        if category.contains("Evening") { return .indigo }
+        if category.contains("Cool Down") { return .teal }
+        if category.contains("Hips") { return .orange }
+        if category.contains("Full Body") { return .green }
+        return .teal
+    }
+
+    private func categoryShortLabel(_ category: String) -> String {
+        if category.contains("Morning") { return "Morning" }
+        if category.contains("Evening") { return "Evening" }
+        if category.contains("Cool Down") { return "Cool Down" }
+        if category.contains("Hips") { return "Hips" }
+        if category.contains("Full Body") { return "Full Body" }
+        return category
     }
 
     var body: some View {
@@ -41,80 +69,81 @@ struct StretchRoutineView: View {
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    HStack {
-                        Toggle(isOn: Binding(
-                            get: { !stretchCategories.isEmpty && selectedCategories.count == stretchCategories.count },
-                            set: { newValue in
-                                selectedCategories = newValue ? Set(stretchCategories) : []
-                            }
-                        )) {
-                            Text("Select All")
-                        }
-                        .toggleStyle(.switch)
-                    }
-
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                        ForEach(stretchCategories, id: \.self) { category in
-                            HStack {
-                                Image(systemName: selectedCategories.contains(category) ? "checkmark.square.fill" : "square")
-                                    .foregroundStyle(selectedCategories.contains(category) ? .teal : .secondary)
-                                Text(category)
-                                    .font(.subheadline)
-                                Spacer()
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if selectedCategories.contains(category) {
-                                    selectedCategories.remove(category)
-                                } else {
-                                    selectedCategories.insert(category)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            let allSelected = selectedCategories.count == stretchCategories.count
+                            Button {
+                                selectedCategories = allSelected ? [] : Set(stretchCategories)
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "figure.cooldown")
+                                    Text("All")
                                 }
+                                .font(.subheadline)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(allSelected ? Color.teal : Color.gray.opacity(0.15))
+                                .foregroundStyle(allSelected ? .white : .primary)
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+
+                            ForEach(stretchCategories, id: \.self) { category in
+                                let isSelected = selectedCategories.contains(category)
+                                let color = categoryColor(category)
+                                Button {
+                                    if isSelected {
+                                        selectedCategories.remove(category)
+                                    } else {
+                                        selectedCategories.insert(category)
+                                    }
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: categoryIcon(category))
+                                        Text(categoryShortLabel(category))
+                                    }
+                                    .font(.subheadline)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 7)
+                                    .background(isSelected ? color : Color.gray.opacity(0.15))
+                                    .foregroundStyle(isSelected ? .white : .primary)
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
+                        .padding(.vertical, 2)
                     }
                 }
 
-                // Duration per side
+                // Hold duration
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Duration per Side")
+                    Text("Hold Duration")
                         .font(.title2)
                         .fontWeight(.semibold)
-                    HStack {
-                        Text("Duration per side")
-                            .font(.subheadline)
-                        Spacer()
-                        Text("\(holdDuration) sec")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(
-                        value: Binding(get: { Double(holdDuration) }, set: { holdDuration = Int($0) }),
-                        in: 15...90,
-                        step: 5
-                    ) {
-                        Text("Duration per Side")
-                    } minimumValueLabel: {
-                        Text("15s").font(.caption2)
-                    } maximumValueLabel: {
-                        Text("90s").font(.caption2)
-                    }
-                }
 
-                // Reps per stretch
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Reps per Stretch")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    Stepper(value: $repsPerStretch, in: 1...10) {
-                        HStack {
-                            Text("Reps per stretch")
-                                .font(.subheadline)
-                            Spacer()
-                            Text("\(repsPerStretch) rep\(repsPerStretch == 1 ? "" : "s")")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        ForEach(holdDurationOptions, id: \.self) { sec in
+                            Button {
+                                holdDuration = sec
+                            } label: {
+                                Text("\(sec)s")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 10)
+                                    .background(holdDuration == sec ? Color.teal : Color.gray.opacity(0.15))
+                                    .foregroundStyle(holdDuration == sec ? .white : .primary)
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
                         }
+                        Spacer()
                     }
+
+                    Text("Time to hold each stretch per side")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 // Both sides mode
@@ -123,11 +152,12 @@ struct StretchRoutineView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "arrow.left.arrow.right")
                                 .foregroundStyle(.teal)
+                                .frame(width: 22)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Both Sides")
                                     .font(.subheadline)
                                     .fontWeight(.medium)
-                                Text("Runs each stretch twice — left then right")
+                                Text("Repeats single-sided stretches on left then right")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -159,16 +189,23 @@ struct StretchRoutineView: View {
                 }
 
                 // Order
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Order")
                         .font(.title2)
                         .fontWeight(.semibold)
                     Toggle(isOn: $isOrdered) {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             Image(systemName: isOrdered ? "list.number" : "shuffle")
                                 .foregroundStyle(.teal)
-                            Text(isOrdered ? "Fixed order" : "Shuffled")
-                                .font(.subheadline)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(isOrdered ? "Fixed Order" : "Randomized")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Text(isOrdered ? "Stretches play in the listed sequence" : "Stretches are shuffled into a random order")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .toggleStyle(.switch)
@@ -204,15 +241,14 @@ struct StretchRoutineView: View {
                                     Text(stretch.name)
                                         .font(.subheadline)
                                     Spacer()
-                                    if bothSidesMode {
-                                        Text("\(holdDuration)s × \(repsPerStretch) × 2")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    } else {
-                                        Text("\(holdDuration)s × \(repsPerStretch)")
-                                            .font(.caption)
+                                    if bothSidesMode && stretch.singleSided {
+                                        Image(systemName: "arrow.left.arrow.right")
+                                            .font(.caption2)
                                             .foregroundStyle(.secondary)
                                     }
+                                    Text(bothSidesMode && stretch.singleSided ? "\(holdDuration)s × 2" : "\(holdDuration)s")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -252,7 +288,6 @@ struct StretchRoutineView: View {
             StretchPlayerView(
                 stretches: generatedStretches,
                 holdDuration: holdDuration,
-                repsPerStretch: repsPerStretch,
                 bothSidesMode: bothSidesMode,
                 onComplete: { completedStretchSession = true }
             )
@@ -289,11 +324,11 @@ struct StretchRoutineView: View {
 
         if maxTotalMinutes > 0 {
             let limitSec = maxTotalMinutes * 60
-            let sidesMultiplier = bothSidesMode ? 2 : 1
             var accumulated = 0
             var count = 0
-            for _ in result {
-                let slotSec = holdDuration * repsPerStretch * sidesMultiplier + StretchPlayerView.transitionDuration
+            for stretch in result {
+                let sides = (bothSidesMode && stretch.singleSided) ? 2 : 1
+                let slotSec = holdDuration * sides + StretchPlayerView.transitionDuration
                 if accumulated + slotSec > limitSec { break }
                 accumulated += slotSec
                 count += 1
@@ -310,12 +345,10 @@ struct StretchRoutineView: View {
 struct StretchPlayerView: View {
     let stretches: [Exercise]
     let holdDuration: Int
-    let repsPerStretch: Int
     let bothSidesMode: Bool
     var onComplete: (() -> Void)? = nil
 
     @State private var currentIndex = 0
-    @State private var currentRep = 1
     @State private var currentSide = 0   // 0 = first/left, 1 = second/right
     @State private var isTransitioning = false
     @State private var timeRemaining = 0
@@ -343,17 +376,19 @@ struct StretchPlayerView: View {
         return CGFloat(timeRemaining) / CGFloat(max(1, total))
     }
 
-    // "Hold" for static stretches, "Move" for circular/dynamic ones
+    // "Hold" for static stretches, "Move" for dynamic/circular ones
     private var actionLabel: String {
         guard let name = currentStretch?.name else { return "Hold" }
         let lower = name.lowercased()
         let dynamicKeywords = ["circle", "rotation", "swing", "roll", "dynamic",
-                               "mobilit", "oscillat", "bounce", "pendulum", "windmill"]
+                               "mobilit", "oscillat", "bounce", "pendulum", "windmill",
+                               "hydrant", "clamshell", "walk-out", "march"]
         return dynamicKeywords.contains(where: { lower.contains($0) }) ? "Move" : "Hold"
     }
 
     private var sideLabel: String? {
         guard bothSidesMode && !isTransitioning && isPlaying else { return nil }
+        guard let stretch = currentStretch, stretch.singleSided else { return nil }
         return currentSide == 0 ? "Left Side" : "Right Side"
     }
 
@@ -396,13 +431,6 @@ struct StretchPlayerView: View {
                         .padding(.horizontal)
                         .animation(.default, value: currentIndex)
 
-                    // Rep indicator
-                    if repsPerStretch > 1 && isPlaying && !isTransitioning {
-                        Text("Rep \(currentRep) of \(repsPerStretch)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-
                     // Timer ring
                     ZStack {
                         Circle()
@@ -427,7 +455,8 @@ struct StretchPlayerView: View {
                             Text("Stretch \(min(currentIndex + 1, stretches.count)) of \(stretches.count)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            if bothSidesMode && !isTransitioning && isPlaying {
+                            if bothSidesMode, !isTransitioning, isPlaying,
+                               let stretch = currentStretch, stretch.singleSided {
                                 Text(currentSide == 0 ? "First side" : "Second side")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -480,7 +509,6 @@ struct StretchPlayerView: View {
             StretchRecapView(
                 stretches: stretches,
                 holdDuration: holdDuration,
-                repsPerStretch: repsPerStretch,
                 bothSidesMode: bothSidesMode,
                 onDismiss: {
                     onComplete?()
@@ -523,14 +551,6 @@ struct StretchPlayerView: View {
     private func skipCurrent() { advance() }
 
     private func advance() {
-        // Not done with all reps → next rep
-        if !isTransitioning && currentRep < repsPerStretch {
-            currentRep += 1
-            timeRemaining = holdDuration
-            playFeedback(.start)
-            return
-        }
-
         // Transition done → start holding
         if isTransitioning {
             isTransitioning = false
@@ -540,10 +560,9 @@ struct StretchPlayerView: View {
             return
         }
 
-        // Finished all reps on first side → switch to second side
-        if bothSidesMode && currentSide == 0 {
+        // Finished first side of a single-sided stretch → switch to second side
+        if bothSidesMode, currentSide == 0, let stretch = currentStretch, stretch.singleSided {
             currentSide = 1
-            currentRep = 1
             timeRemaining = holdDuration
             playFeedback(.start)
             return
@@ -551,7 +570,6 @@ struct StretchPlayerView: View {
 
         // Move to next stretch
         currentIndex += 1
-        currentRep = 1
         currentSide = 0
 
         if currentIndex >= stretches.count {
@@ -806,12 +824,13 @@ struct StretchPlayerView: View {
 struct StretchRecapView: View {
     let stretches: [Exercise]
     let holdDuration: Int
-    let repsPerStretch: Int
     let bothSidesMode: Bool
     let onDismiss: () -> Void
 
     private var totalHoldSeconds: Int {
-        stretches.count * holdDuration * repsPerStretch * (bothSidesMode ? 2 : 1)
+        stretches.reduce(0) { total, stretch in
+            total + holdDuration * (bothSidesMode && stretch.singleSided ? 2 : 1)
+        }
     }
     private var totalTimeSeconds: Int {
         totalHoldSeconds + max(0, stretches.count - 1) * StretchPlayerView.transitionDuration
@@ -835,9 +854,6 @@ struct StretchRecapView: View {
                         RecapStatCard(title: "Total Time",  value: formatted(totalTimeSeconds), icon: "clock",               color: .blue)
                         RecapStatCard(title: "Stretches",  value: "\(stretches.count)",        icon: "figure.cooldown",     color: .teal)
                         RecapStatCard(title: "Hold / Side", value: "\(holdDuration)s",         icon: "timer",               color: .green)
-                        if repsPerStretch > 1 {
-                            RecapStatCard(title: "Reps",   value: "\(repsPerStretch)",         icon: "repeat",              color: .purple)
-                        }
                         if bothSidesMode {
                             RecapStatCard(title: "Both Sides", value: "Yes",                   icon: "arrow.left.arrow.right", color: .indigo)
                         }
@@ -854,6 +870,12 @@ struct StretchRecapView: View {
                                         .frame(width: 28, alignment: .leading)
                                     Text(stretch.name)
                                         .font(.subheadline)
+                                    if stretch.singleSided && bothSidesMode {
+                                        Spacer()
+                                        Image(systemName: "arrow.left.arrow.right")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }

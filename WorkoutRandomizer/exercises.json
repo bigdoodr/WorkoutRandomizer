@@ -119,59 +119,59 @@
             "Beginner": [
                 { "name": "Cat-Cow Stretch", "videoPath": null, "equipment": ["None"] },
                 { "name": "World's Greatest Stretch", "videoPath": null, "equipment": ["None"] },
-                { "name": "Thread the Needle", "videoPath": null, "equipment": ["None"] },
+                { "name": "Thread the Needle", "videoPath": null, "equipment": ["None"], "singleSided": true },
                 { "name": "Seated Forward Fold", "videoPath": null, "equipment": ["None"] },
-                { "name": "Hip Flexor Lunge Stretch", "videoPath": null, "equipment": ["None"] },
+                { "name": "Hip Flexor Lunge Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
                 { "name": "Thoracic Spine Extension", "videoPath": null, "equipment": ["None"] },
-                { "name": "Neck Side Stretch", "videoPath": null, "equipment": ["None"] },
-                { "name": "Cross-Body Shoulder Stretch", "videoPath": null, "equipment": ["None"] }
+                { "name": "Neck Side Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Cross-Body Shoulder Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true }
             ]
         },
         "Evening Recovery": {
             "Beginner": [
-                { "name": "Supine Spinal Twist", "videoPath": null, "equipment": ["None"] },
+                { "name": "Supine Spinal Twist", "videoPath": null, "equipment": ["None"], "singleSided": true },
                 { "name": "Happy Baby", "videoPath": null, "equipment": ["None"] },
-                { "name": "Figure-4 Hip Stretch", "videoPath": null, "equipment": ["None"] },
-                { "name": "Lying Quad Stretch", "videoPath": null, "equipment": ["None"] },
+                { "name": "Figure-4 Hip Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Lying Quad Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
                 { "name": "Butterfly Stretch", "videoPath": null, "equipment": ["None"] },
                 { "name": "Child's Pose", "videoPath": null, "equipment": ["None"] },
                 { "name": "Neck Rolls", "videoPath": null, "equipment": ["None"] },
-                { "name": "Standing Side Bend", "videoPath": null, "equipment": ["None"] }
+                { "name": "Standing Side Bend", "videoPath": null, "equipment": ["None"], "singleSided": true }
             ]
         },
         "Cool Down": {
             "Beginner": [
-                { "name": "Standing Quad Stretch", "videoPath": null, "equipment": ["None"] },
-                { "name": "Standing Hamstring Stretch", "videoPath": null, "equipment": ["None"] },
-                { "name": "Standing Calf Stretch", "videoPath": null, "equipment": ["None"] },
-                { "name": "Hip Flexor Stretch", "videoPath": null, "equipment": ["None"] },
+                { "name": "Standing Quad Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Standing Hamstring Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Standing Calf Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Hip Flexor Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
                 { "name": "Doorway Chest Opener", "videoPath": null, "equipment": ["None"] },
-                { "name": "Overhead Tricep Stretch", "videoPath": null, "equipment": ["None"] },
-                { "name": "Wrist Flexor Stretch", "videoPath": null, "equipment": ["None"] },
+                { "name": "Overhead Tricep Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Wrist Flexor Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
                 { "name": "Deep Belly Breathing", "videoPath": null, "equipment": ["None"] }
             ]
         },
         "Warm-Up: Hips": {
             "Beginner": [
                 { "name": "Hip Circles", "videoPath": null, "equipment": ["None"] },
-                { "name": "Fire Hydrants", "videoPath": null, "equipment": ["None"] },
-                { "name": "Lateral Lunge Stretch", "videoPath": null, "equipment": ["None"] },
-                { "name": "Hip 90/90 Rotations", "videoPath": null, "equipment": ["None"] },
-                { "name": "Pigeon Pose Prep", "videoPath": null, "equipment": ["None"] },
+                { "name": "Fire Hydrants", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Lateral Lunge Stretch", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Hip 90/90 Rotations", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Pigeon Pose Prep", "videoPath": null, "equipment": ["None"], "singleSided": true },
                 { "name": "Deep Squat Hold", "videoPath": null, "equipment": ["None"] },
-                { "name": "Clamshells", "videoPath": null, "equipment": ["None"] },
-                { "name": "Standing Hip Swings", "videoPath": null, "equipment": ["None"] }
+                { "name": "Clamshells", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Standing Hip Swings", "videoPath": null, "equipment": ["None"], "singleSided": true }
             ]
         },
         "Warm-Up: Full Body": {
             "Beginner": [
                 { "name": "Arm Circles", "videoPath": null, "equipment": ["None"] },
-                { "name": "Leg Swings", "videoPath": null, "equipment": ["None"] },
+                { "name": "Leg Swings", "videoPath": null, "equipment": ["None"], "singleSided": true },
                 { "name": "Trunk Rotations", "videoPath": null, "equipment": ["None"] },
                 { "name": "Inchworm Walk-Outs", "videoPath": null, "equipment": ["None"] },
                 { "name": "Slow High Knees", "videoPath": null, "equipment": ["None"] },
-                { "name": "Ankle Circles", "videoPath": null, "equipment": ["None"] },
-                { "name": "Wrist Circles", "videoPath": null, "equipment": ["None"] },
+                { "name": "Ankle Circles", "videoPath": null, "equipment": ["None"], "singleSided": true },
+                { "name": "Wrist Circles", "videoPath": null, "equipment": ["None"], "singleSided": true },
                 { "name": "Neck Rotations", "videoPath": null, "equipment": ["None"] }
             ]
         }

@@ -99,6 +99,7 @@ struct Exercise {
     let name: String
     let videoPath: String?
     let equipment: [String]
+    var singleSided: Bool = false
 }
 
 enum TimerStyle: String, CaseIterable, Identifiable {
