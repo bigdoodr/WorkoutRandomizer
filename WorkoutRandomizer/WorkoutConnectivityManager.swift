@@ -138,12 +138,10 @@ class WorkoutConnectivityManager: ObservableObject {
 
     func sendPrepareToStart() {
         guard let session = session else { return }
-        let message: [String: Any] = ["type": "prepareToStart"]
-        if session.isReachable {
-            session.sendMessage(message, replyHandler: nil)
-        } else {
-            session.transferUserInfo(message)
-        }
+        // Always use transferUserInfo — unlike sendMessage it queues reliably and
+        // triggers a WKWatchConnectivityRefreshBackgroundTask on the Watch even when
+        // the Watch app isn't running, letting it post a local notification to surface itself.
+        session.transferUserInfo(["type": "prepareToStart"])
     }
 
     // MARK: - Receive health metrics from Watch

@@ -5,6 +5,7 @@
 #if os(watchOS)
 import Combine
 import Foundation
+import UserNotifications
 import WatchConnectivity
 import WatchKit
 
@@ -136,11 +137,30 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
 
     // Queued delivery when watch app was not in foreground
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String : Any] = [:]) {
-        if let type = userInfo["type"] as? String, type == "prepareToStart" {
-            DispatchQueue.main.async {
-                self.isReadyToStart = true
+        guard let type = userInfo["type"] as? String, type == "prepareToStart" else { return }
+        DispatchQueue.main.async {
+            self.isReadyToStart = true
+            // When the app is backgrounded, surface it via a local notification so the
+            // user sees a banner on the watch face and can tap directly into the ready screen.
+            if WKApplication.shared().applicationState == .background {
+                self.postPrepareToStartNotification()
             }
         }
+    }
+
+    private func postPrepareToStartNotification() {
+        let content = UNMutableNotificationContent()
+        content.title = "Ready to Start"
+        content.body = "Open to begin your workout on Apple Watch."
+        content.sound = .default
+        content.userInfo = ["action": "prepareToStart"]
+
+        let request = UNNotificationRequest(
+            identifier: "prepareToStart",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: Helpers
