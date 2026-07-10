@@ -120,6 +120,20 @@ class WorkoutConnectivityManager: ObservableObject {
         session.sendMessage(message, replyHandler: nil)
     }
 
+    func sendWorkoutCompleted(count: Int, totalSeconds: Int, label: String) {
+        guard let session = session else { return }
+        // Clear context so a stale workout state isn't re-applied on next watch wake
+        try? session.updateApplicationContext([:])
+        guard session.isReachable else { return }
+        let message: [String: Any] = [
+            "type": "workoutCompleted",
+            "count": count,
+            "totalSeconds": totalSeconds,
+            "label": label
+        ]
+        session.sendMessage(message, replyHandler: nil)
+    }
+
     // MARK: - Watch handoff
 
     func sendPrepareToStart() {
@@ -214,6 +228,7 @@ final class WorkoutConnectivityManager: NSObject, ObservableObject {
     func sendTimerUpdate(timeRemaining: Int) { }
     func sendFeedbackEvent(_ event: FeedbackType) { }
     func sendControlMessage(_ messageType: ControlMessage) { }
+    func sendWorkoutCompleted(count: Int, totalSeconds: Int, label: String) { }
 }
 
 #endif

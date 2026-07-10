@@ -10,6 +10,12 @@ import WatchKit
 
 // MARK: - watchOS-specific WorkoutConnectivityManager
 
+struct WatchCompletedSummary {
+    let count: Int
+    let totalSeconds: Int
+    let label: String
+}
+
 class WorkoutConnectivityManager: NSObject, ObservableObject {
     static let shared = WorkoutConnectivityManager()
 
@@ -19,6 +25,8 @@ class WorkoutConnectivityManager: NSObject, ObservableObject {
     @Published var shouldPromptToStartTracking = false
     /// Set to true when iPhone sends a prepareToStart signal; shows Start button on watch
     @Published var isReadyToStart = false
+    /// Non-nil when the iPhone signals natural workout completion; drives the watch recap screen
+    @Published var completedSummary: WatchCompletedSummary?
 
     private let session: WCSession? = WCSession.isSupported() ? WCSession.default : nil
 
@@ -107,6 +115,15 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
                     self.handleControl(control)
                 }
 
+            // --- Natural workout/stretch completion ---
+            case "workoutCompleted":
+                let count = message["count"] as? Int ?? 0
+                let totalSeconds = message["totalSeconds"] as? Int ?? 0
+                let label = message["label"] as? String ?? "Workout"
+                self.completedSummary = WatchCompletedSummary(count: count, totalSeconds: totalSeconds, label: label)
+                self.workoutState = nil
+                WorkoutSessionManager.shared.endWorkout()
+
             // --- Handoff: iPhone ready for watch to start ---
             case "prepareToStart":
                 self.isReadyToStart = true
@@ -144,6 +161,9 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
     }
 
     private func applyTimerUpdate(_ time: Int) {
+        // Don't resurrect a state after natural completion — prevents the "0 timer" stuck screen
+        guard completedSummary == nil else { return }
+
         if let state = self.workoutState {
             self.workoutState = WorkoutState(
                 currentExerciseName: state.currentExerciseName,
@@ -170,6 +190,11 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
         }
     }
 
+    func dismissCompleted() {
+        completedSummary = nil
+        isReadyToStart = false
+    }
+
     private func handleControl(_ control: ControlMessage) {
         switch control {
         case .workoutPaused:
@@ -178,7 +203,10 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
             WorkoutSessionManager.shared.resumeWorkout()
         case .workoutStopped:
             WorkoutSessionManager.shared.endWorkout()
-            self.workoutState = nil
+            // Only clear workout state for manual stops; natural completion already set completedSummary
+            if completedSummary == nil {
+                self.workoutState = nil
+            }
         }
     }
 

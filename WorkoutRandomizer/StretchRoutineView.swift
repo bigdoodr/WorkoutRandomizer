@@ -577,7 +577,7 @@ struct StretchPlayerView: View {
             timer = nil
             isPlaying = false
             playFeedback(.complete)
-            sendControlToWatch(.workoutStopped)
+            sendWorkoutCompletedToWatch()
             showingRecap = true
             return
         }
@@ -815,6 +815,21 @@ struct StretchPlayerView: View {
     private func sendControlToWatch(_ control: ControlMessage) {
         #if os(iOS)
         connectivityManager.sendControlMessage(control)
+        #endif
+    }
+
+    private var estimatedTotalSeconds: Int {
+        let holdTotal = stretches.reduce(0) { $0 + holdDuration * ($1.singleSided && bothSidesMode ? 2 : 1) }
+        return holdTotal + max(0, stretches.count - 1) * Self.transitionDuration
+    }
+
+    private func sendWorkoutCompletedToWatch() {
+        #if os(iOS)
+        connectivityManager.sendWorkoutCompleted(
+            count: stretches.count,
+            totalSeconds: estimatedTotalSeconds,
+            label: "Stretch"
+        )
         #endif
     }
 }

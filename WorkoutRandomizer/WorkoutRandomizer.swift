@@ -2079,8 +2079,14 @@ struct WorkoutPlayerView: View {
 
         if currentIndex >= routine.count {
             playFeedback(.complete)
-            sendWorkoutStateToWatch()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                #if os(iOS)
+                self.connectivityManager.sendWorkoutCompleted(
+                    count: self.completedExerciseNames.count,
+                    totalSeconds: self.totalExerciseTime + self.totalRestTime,
+                    label: "Workout"
+                )
+                #endif
                 self.stopWorkout()
                 self.showingRecap = true
             }

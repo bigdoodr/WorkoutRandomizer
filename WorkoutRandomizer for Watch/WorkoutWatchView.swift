@@ -16,6 +16,88 @@ struct WorkoutWatchView: View {
     }
     
     var body: some View {
+        Group {
+            if let summary = connectivityManager.completedSummary {
+                completedRecapView(summary: summary)
+            } else {
+                activeWorkoutView
+            }
+        }
+        .confirmationDialog(
+            "End Workout?",
+            isPresented: $showEndWorkoutConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("End Workout", role: .destructive) {
+                sessionManager.endWorkout()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will stop fitness tracking and save your workout to Health.")
+        }
+        .alert(
+            "Start Fitness Tracking?",
+            isPresented: $connectivityManager.shouldPromptToStartTracking
+        ) {
+            Button("Start") {
+                Task {
+                    await sessionManager.startWorkout()
+                }
+            }
+            Button("Not Now", role: .cancel) { }
+        } message: {
+            Text("A workout is running on your iPhone. Would you like to track it with Apple Health?")
+        }
+    }
+
+    @ViewBuilder
+    private func completedRecapView(summary: WatchCompletedSummary) -> some View {
+        ScrollView {
+            VStack(spacing: 14) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.teal)
+
+                Text("\(summary.label) Complete!")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+
+                VStack(spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: summary.label == "Stretch" ? "figure.cooldown" : "figure.run")
+                        Text("\(summary.count) \(summary.label == "Stretch" ? "stretches" : "exercises")")
+                            .fontWeight(.medium)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock")
+                        Text(formattedTime(summary.totalSeconds))
+                            .fontWeight(.medium)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                Button("Done") {
+                    connectivityManager.dismissCompleted()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.teal)
+                .padding(.top, 4)
+            }
+            .padding()
+        }
+    }
+
+    private func formattedTime(_ seconds: Int) -> String {
+        String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    @ViewBuilder
+    private var activeWorkoutView: some View {
         ScrollView {
             VStack(spacing: 12) {
                 if let state = workoutState {
@@ -156,31 +238,6 @@ struct WorkoutWatchView: View {
                 }
             }
             .padding()
-        }
-        .confirmationDialog(
-            "End Workout?",
-            isPresented: $showEndWorkoutConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("End Workout", role: .destructive) {
-                sessionManager.endWorkout()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will stop fitness tracking and save your workout to Health.")
-        }
-        .alert(
-            "Start Fitness Tracking?",
-            isPresented: $connectivityManager.shouldPromptToStartTracking
-        ) {
-            Button("Start") {
-                Task {
-                    await sessionManager.startWorkout()
-                }
-            }
-            Button("Not Now", role: .cancel) { }
-        } message: {
-            Text("A workout is running on your iPhone. Would you like to track it with Apple Health?")
         }
     }
 }
