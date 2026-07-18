@@ -10,11 +10,11 @@ struct WorkoutWatchView: View {
     @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
     @StateObject private var sessionManager = WorkoutSessionManager.shared
     @State private var showEndWorkoutConfirmation = false
-    
+
     var workoutState: WorkoutState? {
         connectivityManager.workoutState
     }
-    
+
     var body: some View {
         Group {
             if let summary = connectivityManager.completedSummary {
@@ -30,6 +30,7 @@ struct WorkoutWatchView: View {
         ) {
             Button("End Workout", role: .destructive) {
                 sessionManager.endWorkout()
+                WorkoutConnectivityManager.shared.sendRequestStop()
             }
             Button("Cancel", role: .cancel) { }
         } message: {
@@ -79,6 +80,28 @@ struct WorkoutWatchView: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                    if summary.peakHeartRate > 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "heart.fill")
+                                .foregroundStyle(.red)
+                            Text("\(Int(summary.peakHeartRate)) BPM peak")
+                                .fontWeight(.medium)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+
+                    if summary.activeCalories > 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "flame.fill")
+                                .foregroundStyle(.orange)
+                            Text("\(Int(summary.activeCalories)) kcal")
+                                .fontWeight(.medium)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
                 }
 
                 Button("Done") {
@@ -101,25 +124,62 @@ struct WorkoutWatchView: View {
         ScrollView {
             VStack(spacing: 12) {
                 if let state = workoutState {
-                    // Current Exercise Name
-                    Text(state.currentExerciseName)
-                        .font(.title3)
-                        .fontWeight(.bold)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.7)
-                        .foregroundStyle(state.isRest ? .blue : .primary)
-                    
-                    // Timer Display
-                    Text("\(state.timeRemaining)")
-                        .font(.system(size: 56, weight: .bold, design: .monospaced))
-                        .foregroundStyle(state.timeRemaining <= 3 && state.timeRemaining > 0 ? .red : .green)
-                    
+                    if state.isRest {
+                        // Rest / Get Ready phase: emphasize what's coming next
+                        Text(state.currentExerciseName)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.orange)
+
+                        Text("\(state.timeRemaining)")
+                            .font(.system(size: 56, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.orange)
+
+                        if let nextName = state.nextExerciseName {
+                            VStack(spacing: 2) {
+                                Text("Next up")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(nextName)
+                                    .font(.title3)
+                                    .fontWeight(.bold)
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.7)
+                            }
+                        }
+                    } else {
+                        // Active exercise/stretch
+                        Text(state.currentExerciseName)
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.7)
+
+                        if let side = state.sideLabel {
+                            Text(side)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.indigo)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color.indigo.opacity(0.2))
+                                .clipShape(Capsule())
+                        }
+
+                        Text("\(state.timeRemaining)")
+                            .font(.system(size: 56, weight: .bold, design: .monospaced))
+                            .foregroundStyle(state.timeRemaining <= 3 && state.timeRemaining > 0 ? .red : .green)
+                    }
+
                     // Progress Indicator
-                    Text("\(state.currentIndex + 1) of \(state.totalExercises)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    
+                    if state.totalExercises > 0 {
+                        Text("\(state.currentIndex + 1) of \(state.totalExercises)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     // HealthKit metrics
                     if sessionManager.isWorkoutActive {
                         HStack(spacing: 12) {
@@ -135,9 +195,9 @@ struct WorkoutWatchView: View {
                             }
                         }
                     }
-                    
-                    // Next Exercise
-                    if let nextName = state.nextExerciseName {
+
+                    // Next Exercise (during active phase; rest phase shows it above)
+                    if !state.isRest, let nextName = state.nextExerciseName {
                         VStack(spacing: 2) {
                             Text("Next:")
                                 .font(.caption2)
@@ -150,7 +210,7 @@ struct WorkoutWatchView: View {
                                 .foregroundStyle(nextName == "Rest" ? .blue : .primary)
                         }
                     }
-                    
+
                     // Status
                     if state.isPaused {
                         Label("Paused", systemImage: "pause.fill")
@@ -161,7 +221,7 @@ struct WorkoutWatchView: View {
                             .font(.caption2)
                             .foregroundStyle(.green)
                     }
-                    
+
                     // End Workout button - always visible when a workout is active
                     if sessionManager.isWorkoutActive {
                         Button(role: .destructive) {
@@ -172,7 +232,12 @@ struct WorkoutWatchView: View {
                         }
                         .padding(.top, 8)
                     }
-                    
+
+                } else if connectivityManager.isAwaitingSessionStart {
+                    // User tapped Start on the watch; waiting for the iPhone to begin
+                    StartingView {
+                        connectivityManager.sendRequestStart()
+                    }
                 } else if connectivityManager.isReadyToStart {
                     // iPhone is waiting — show Start button on watch
                     VStack(spacing: 16) {
@@ -184,12 +249,17 @@ struct WorkoutWatchView: View {
                             .font(.headline)
                             .multilineTextAlignment(.center)
 
-                        Text("Tap Start to begin and track your fitness")
+                        Text("Starts the session on both devices and tracks your fitness")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
 
                         Button {
+                            // Start fitness tracking right away, then tell the
+                            // iPhone to begin the routine — one tap does it all.
+                            Task {
+                                await sessionManager.startWorkout()
+                            }
                             connectivityManager.sendRequestStart()
                         } label: {
                             Label("Start Workout", systemImage: "play.fill")
@@ -238,6 +308,49 @@ struct WorkoutWatchView: View {
                 }
             }
             .padding()
+        }
+    }
+}
+
+/// Shown after the user taps Start on the watch, while waiting for the iPhone
+/// to begin the routine. If the phone hasn't started after a few seconds, a
+/// fallback button appears to re-send the start request.
+private struct StartingView: View {
+    let onRetry: () -> Void
+    @State private var showRetry = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.4)
+                .padding(.top, 8)
+
+            Text("Starting…")
+                .font(.headline)
+
+            Text("Get in position — your session is about to begin")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            if showRetry {
+                Button {
+                    onRetry()
+                } label: {
+                    Label("Start Now", systemImage: "play.fill")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .padding(.top, 4)
+                .transition(.opacity)
+            }
+        }
+        .padding()
+        .task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            withAnimation { showRetry = true }
         }
     }
 }

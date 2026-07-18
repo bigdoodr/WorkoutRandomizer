@@ -254,7 +254,7 @@ struct WorkoutDocument: FileDocument {
 }
 
 struct WorkoutGeneratorView: View {
-    @State private var selectedFocusAreas: Set<String> = ["Legs", "Core", "Cardio"]
+    @State private var selectedFocusAreas: Set<String> = []
     @State private var difficulty = "Expert/Advanced"
     @State private var totalDuration = 10
     @State private var exerciseDuration = 20
@@ -281,10 +281,8 @@ struct WorkoutGeneratorView: View {
     @AppStorage("useAdvancedView") private var useAdvancedView = false
     @State private var showingTutorial = false
     @State private var customExerciseStore = CustomExerciseStore.shared
-#if os(iOS)
-    @State private var showingWatchHandoff = false
-    @State private var startWorkoutAfterHandoff = false
-#endif
+    @State private var showCustomTimers = false
+    @State private var exerciseDurationOverrides: [Int: Int] = [:]
 
     @StateObject private var videoManager = VideoManager.shared
     @State private var catalog = ExerciseCatalog.shared
@@ -413,6 +411,7 @@ struct WorkoutGeneratorView: View {
     @State private var exercisesPerBlock: Int = 3
     @State private var blockDurations: [Int] = [30, 25, 45]
     @State private var blocksTotalSets: Int = 2
+    @State private var shuffleBlockSets: Bool = false
 
     var blocksSuperSetSeconds: Int {
         blockDurations.reduce(0) { $0 + exercisesPerBlock * $1 * 2 }
@@ -471,16 +470,29 @@ struct WorkoutGeneratorView: View {
                             }
                         }
 
-                        NavigationLink(destination: StretchRoutineView()) {
-                            HStack {
-                                Image(systemName: "figure.cooldown")
-                                Text("Stretch Routine")
+                        HStack(spacing: 10) {
+                            NavigationLink(destination: StretchRoutineView()) {
+                                HStack {
+                                    Image(systemName: "figure.cooldown")
+                                    Text("Stretch Routine")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(.teal)
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(.teal)
-                            .foregroundStyle(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            NavigationLink(destination: SavedRoutinesView()) {
+                                HStack {
+                                    Image(systemName: "folder.fill")
+                                    Text("Saved Routines")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(.brown)
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
                         }
                         
                         // Basic/Advanced mode label
@@ -504,43 +516,6 @@ struct WorkoutGeneratorView: View {
                             // Quick filters — multi-select: tap to toggle each group
                             focusAreaFilterRow
 
-                            if useAdvancedView {
-                            HStack {
-                                Toggle(isOn: Binding(
-                                    get: { selectedFocusAreas.count == workoutFocusAreas.count },
-                                    set: { newValue in
-                                        if newValue {
-                                            selectedFocusAreas = Set(workoutFocusAreas)
-                                        } else {
-                                            selectedFocusAreas.removeAll()
-                                        }
-                                    }
-                                )) {
-                                    Text("Select All")
-                                }
-                                .toggleStyle(.switch)
-                            }
-                            
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                                ForEach(workoutFocusAreas, id: \.self) { area in
-                                    HStack {
-                                        Image(systemName: selectedFocusAreas.contains(area) ? "checkmark.square.fill" : "square")
-                                            .foregroundStyle(selectedFocusAreas.contains(area) ? .blue : .secondary)
-                                        Text(area)
-                                            .font(.subheadline)
-                                        Spacer()
-                                    }
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        if selectedFocusAreas.contains(area) {
-                                            selectedFocusAreas.remove(area)
-                                        } else {
-                                            selectedFocusAreas.insert(area)
-                                        }
-                                    }
-                                }
-                            }
-                            } // end if useAdvancedView
                         }
 
                         // Equipment Available
@@ -874,6 +849,19 @@ struct WorkoutGeneratorView: View {
                                         .frame(height: 100)
                                         #endif
                                     }
+
+                                    // Shuffle option (only meaningful when sets > 1)
+                                    if blocksTotalSets > 1 {
+                                        Toggle(isOn: $shuffleBlockSets) {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text("Shuffle order each set")
+                                                    .font(.subheadline)
+                                                Text("Re-randomize exercise order every cycle")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -970,10 +958,31 @@ struct WorkoutGeneratorView: View {
                         // Generated Routine
                         if !generatedRoutine.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Generated Routine")
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                                
+                                HStack {
+                                    Text("Generated Routine")
+                                        .font(.title2)
+                                        .fontWeight(.semibold)
+                                    Spacer()
+                                    if useAdvancedView {
+                                        Button {
+                                            withAnimation(.easeInOut(duration: 0.2)) {
+                                                showCustomTimers.toggle()
+                                                if !showCustomTimers { exerciseDurationOverrides.removeAll() }
+                                            }
+                                        } label: {
+                                            Label(showCustomTimers ? "Timers On" : "Custom Timers",
+                                                  systemImage: showCustomTimers ? "timer.circle.fill" : "timer.circle")
+                                                .font(.caption)
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 6)
+                                                .background(showCustomTimers ? Color.blue : Color.gray.opacity(0.15))
+                                                .foregroundStyle(showCustomTimers ? .white : .primary)
+                                                .clipShape(Capsule())
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+
                                 LazyVStack(alignment: .leading, spacing: 8) {
                                     ForEach(Array(generatedRoutine.enumerated()), id: \.offset) { index, exercise in
                                         HStack {
@@ -984,6 +993,37 @@ struct WorkoutGeneratorView: View {
                                             Text(exercise.name)
                                                 .font(.subheadline)
                                             Spacer()
+                                            if showCustomTimers && exercise.name != "Rest" {
+                                                HStack(spacing: 4) {
+                                                    Text("\(exerciseDurationOverrides[index] ?? exerciseDuration)s")
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                        .frame(minWidth: 32, alignment: .trailing)
+                                                    Stepper(
+                                                        value: Binding(
+                                                            get: { exerciseDurationOverrides[index] ?? exerciseDuration },
+                                                            set: { exerciseDurationOverrides[index] = $0 }
+                                                        ),
+                                                        in: 5...300, step: 5
+                                                    ) { EmptyView() }
+                                                    .labelsHidden()
+                                                }
+                                            } else if showCustomTimers && exercise.name == "Rest" {
+                                                HStack(spacing: 4) {
+                                                    Text("\(exerciseDurationOverrides[index] ?? restDuration)s")
+                                                        .font(.caption)
+                                                        .foregroundStyle(.blue)
+                                                        .frame(minWidth: 32, alignment: .trailing)
+                                                    Stepper(
+                                                        value: Binding(
+                                                            get: { exerciseDurationOverrides[index] ?? restDuration },
+                                                            set: { exerciseDurationOverrides[index] = $0 }
+                                                        ),
+                                                        in: 5...300, step: 5
+                                                    ) { EmptyView() }
+                                                    .labelsHidden()
+                                                }
+                                            }
                                         }
                                         .padding(.vertical, 2)
                                     }
@@ -994,11 +1034,7 @@ struct WorkoutGeneratorView: View {
                                 
                                 HStack(spacing: 12) {
                                     Button {
-#if os(iOS)
-                                        showingWatchHandoff = true
-#else
                                         showingWorkout = true
-#endif
                                     } label: {
                                         HStack {
                                             Image(systemName: "play.fill")
@@ -1087,21 +1123,10 @@ struct WorkoutGeneratorView: View {
                 blocksConfig: timerStyle == .blocks ? RepeatingBlocksConfig(exercisesPerBlock: exercisesPerBlock, blockDurations: blockDurations) : nil,
                 enableSound_iOS_tv_vision: enableSound_iOS_tv_vision,
                 enableHaptics_iOS_vision: enableHaptics_iOS_vision,
-                enableSound_macOS: enableSound_macOS
+                enableSound_macOS: enableSound_macOS,
+                durationOverrides: exerciseDurationOverrides.isEmpty ? nil : exerciseDurationOverrides
             )
         }
-#if os(iOS)
-        .sheet(isPresented: $showingWatchHandoff, onDismiss: {
-            if startWorkoutAfterHandoff {
-                startWorkoutAfterHandoff = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    showingWorkout = true
-                }
-            }
-        }) {
-            WatchHandoffView { startWorkoutAfterHandoff = true }
-        }
-#endif
         .sheet(isPresented: $showingTutorial) {
             TutorialView()
         }
@@ -1272,10 +1297,23 @@ struct WorkoutGeneratorView: View {
             // Build final routine with rests
             var routine: [Exercise] = []
             if timerStyle == .pyramid || timerStyle == .blocks {
+                // For blocks with shuffle: divide exercises into sets and shuffle each independently
+                let exercises: [Exercise]
+                if timerStyle == .blocks && shuffleBlockSets && blocksTotalSets > 1 {
+                    let setSize = blocksCount * exercisesPerBlock
+                    let basePool = Array(selected.prefix(setSize))
+                    var shuffled: [Exercise] = []
+                    for _ in 0..<blocksTotalSets {
+                        shuffled.append(contentsOf: basePool.shuffled())
+                    }
+                    exercises = shuffled
+                } else {
+                    exercises = selected
+                }
                 // Every exercise gets its own rest (except the last)
-                for (index, exercise) in selected.enumerated() {
+                for (index, exercise) in exercises.enumerated() {
                     routine.append(exercise)
-                    if index < selected.count - 1 {
+                    if index < exercises.count - 1 {
                         routine.append(Exercise(name: "Rest", videoPath: nil, equipment: ["None"]))
                     }
                 }
@@ -1289,6 +1327,8 @@ struct WorkoutGeneratorView: View {
             }
 
             generatedRoutine = routine
+            exerciseDurationOverrides.removeAll()
+            showCustomTimers = false
             isGenerating = false
             scrollToGeneratedToken = UUID()
         }
@@ -1398,6 +1438,7 @@ struct WorkoutPlayerView: View {
     let enableSound_iOS_tv_vision: Bool
     let enableHaptics_iOS_vision: Bool
     let enableSound_macOS: Bool
+    var durationOverrides: [Int: Int]? = nil
 
     static let pyramidIntervals: [(work: Int, rest: Int)] = [
         (30, 30), (40, 40), (50, 50), (50, 50), (40, 40), (30, 30)
@@ -1408,6 +1449,8 @@ struct WorkoutPlayerView: View {
     @State private var isPlaying = false
     @State private var isPaused = false
     @State private var timer: Timer?
+    /// Non-nil while the auto-start countdown ("Get Ready… 3-2-1") is showing
+    @State private var startCountdown: Int? = nil
 
     // Workout stats
     @State private var totalExerciseTime = 0
@@ -1467,6 +1510,8 @@ struct WorkoutPlayerView: View {
 
     private var durationForCurrentPosition: Int {
         guard let exercise = currentExercise else { return 0 }
+        // Per-exercise override takes highest priority
+        if let override = durationOverrides?[currentIndex] { return override }
         if timerStyle == .pyramid {
             let interval = Self.pyramidIntervals[currentPyramidPhase]
             return exercise.name == "Rest" ? interval.rest : interval.work
@@ -1622,6 +1667,19 @@ struct WorkoutPlayerView: View {
                     .padding()
                 }
                 .safeAreaInset(edge: .bottom) {
+                    VStack(spacing: 6) {
+#if os(iOS)
+                    if !isPlaying {
+                        let watchMsg: String = {
+                            if connectivityManager.isWatchReachable { return "You can also start from your Apple Watch" }
+                            if connectivityManager.isWatchConnected { return "Watch Connected" }
+                            return "Looking for Watch…"
+                        }()
+                        Label(watchMsg, systemImage: "applewatch")
+                            .font(.caption)
+                            .foregroundStyle(connectivityManager.isWatchReachable ? .secondary : .tertiary)
+                    }
+#endif
                     HStack(spacing: 40) {
                         if !isPlaying {
                             Button {
@@ -1669,6 +1727,7 @@ struct WorkoutPlayerView: View {
                                 .clipShape(Circle())
                             }
                         }
+                    }
                     }
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
@@ -1720,9 +1779,51 @@ struct WorkoutPlayerView: View {
             #if canImport(HealthKit)
             fetchUserMaxHeartRate()
             #endif
+            prepareWatchHandoff()
         }
         .onDisappear {
             stopWorkout()
+        }
+#if os(iOS)
+        // The Apple Watch tapped Start — begin after a short countdown
+        .onChange(of: connectivityManager.watchRequestedStart) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedStart = false
+                if !isPlaying {
+                    beginStartCountdown()
+                }
+            }
+        }
+        // The Apple Watch tapped End Workout — stop the routine on the iPhone too
+        .onChange(of: connectivityManager.watchRequestedStop) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedStop = false
+                if isPlaying { stopWorkout(); dismiss() }
+            }
+        }
+#endif
+        .overlay {
+            if let count = startCountdown {
+                ZStack {
+                    Color.black.opacity(0.55).ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        Text("Get Ready")
+                            .font(.title)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                        Text("\(count)")
+                            .font(.system(size: 96, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.green)
+                            .contentTransition(.numericText(countsDown: true))
+                        if let name = currentExercise?.name {
+                            Text("First up: \(name)")
+                                .font(.headline)
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                    }
+                }
+                .transition(.opacity)
+            }
         }
         .sheet(isPresented: $showingRecap) {
             WorkoutRecapView(
@@ -1989,9 +2090,30 @@ struct WorkoutPlayerView: View {
         #endif
     }
     
+    /// Shows a short "Get Ready" countdown, then starts the workout. Used when
+    /// the session was initiated from the Apple Watch or the handoff screen.
+    private func beginStartCountdown(seconds: Int = 3) {
+        guard !isPlaying, startCountdown == nil else { return }
+        startCountdown = seconds
+        playFeedback(.warning)
+        Task { @MainActor in
+            var remaining = seconds
+            while remaining > 1 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                remaining -= 1
+                withAnimation { startCountdown = remaining }
+                playFeedback(.warning)
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            withAnimation { startCountdown = nil }
+            startWorkout()
+        }
+    }
+
     private func startWorkout() {
         // Flip minimal UI state immediately to finish the gesture quickly
         isPlaying = true
+        setIdleTimer(disabled: true)
 
         // Defer heavier work to the next run loop to avoid blocking the gesture handler
         DispatchQueue.main.async {
@@ -2001,6 +2123,25 @@ struct WorkoutPlayerView: View {
             self.launchWatchWorkoutSession()
             self.startTimer()
         }
+    }
+
+    /// Keeps the screen awake during a workout session (iOS only).
+    private func setIdleTimer(disabled: Bool) {
+#if os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = disabled
+#endif
+    }
+
+    /// Called when the player appears: auto-launches the watch app (via
+    /// startWatchApp) so its Ready screen comes up without the user having to
+    /// open it manually, and signals readiness over WatchConnectivity.
+    private func prepareWatchHandoff() {
+#if os(iOS)
+        guard !isPlaying else { return }
+        connectivityManager.watchRequestedStart = false
+        connectivityManager.sendPrepareToStart()
+        launchWatchWorkoutSession()
+#endif
     }
     
     private func launchWatchWorkoutSession() {
@@ -2115,6 +2256,7 @@ struct WorkoutPlayerView: View {
     }
     
     private func stopWorkout() {
+        setIdleTimer(disabled: false)
         avPlayer?.pause()
         avPlayer = nil
         if let obs = playerEndObserver {
@@ -2638,10 +2780,12 @@ struct TutorialView: View {
 
     private let pages: [TutorialPage] = [
         TutorialPage(title: "Welcome!", body: "Generate custom bodyweight workouts tailored to your focus areas, difficulty level, and available equipment.", icon: "figure.run", color: .blue),
-        TutorialPage(title: "Focus & Equipment", body: "Choose which muscle groups to target and what equipment you have on hand. Use 'Select All' to toggle everything at once.", icon: "checkmark.square.fill", color: .purple),
-        TutorialPage(title: "Stretch Routine", body: "The Stretch Routine section is completely separate from regular workouts. Set hold duration, reps per stretch, and choose your categories — no cardio-style rest intervals.", icon: "figure.cooldown", color: .teal),
+        TutorialPage(title: "Focus & Equipment", body: "Tap the icon chips to choose which muscle groups to target. Select one or many — the generated workout will draw from those areas. Pick the equipment you have available too.", icon: "figure.mixed.cardio", color: .purple),
+        TutorialPage(title: "Saved Routines", body: "Tap 'Saved Routines' on the home screen for expertly curated workouts, including Athlean-X morning stretches, bedtime stretches, and a 10-minute ab routine — each with per-exercise timers built in.", icon: "folder.fill", color: .brown),
+        TutorialPage(title: "Audio & Video", body: "Exercise videos stream by default over Wi-Fi/cellular. In Advanced mode you can pre-download them for offline use or disable video entirely. Audio countdown cues play automatically — set your phone to ring (not silent) for sound.", icon: "play.rectangle.fill", color: .pink),
+        TutorialPage(title: "Stretch Routine", body: "The Stretch Routine section is completely separate from regular workouts. Set hold duration, choose your categories, and optionally cap the total time — no cardio-style rest intervals.", icon: "figure.cooldown", color: .teal),
         TutorialPage(title: "Set Your Intention", body: "Tell the app your goal — Fat Burn, Cardio Endurance, Strength, or General Fitness. During workouts, tap your HR Zone for personalized zone tips.", icon: "flame", color: .orange),
-        TutorialPage(title: "Apple Watch", body: "Pair your Apple Watch to see live heart rate, HR zone, and calorie data. A full recap is shown after each workout.", icon: "applewatch", color: .red),
+        TutorialPage(title: "Apple Watch", body: "Pair your Apple Watch to see live heart rate, HR zone, and calorie data. The Watch status bar below the Start button always shows connection state — look for 'Watch Connected' or 'You can also start from your Apple Watch'.", icon: "applewatch", color: .red),
     ]
 
     var body: some View {
@@ -2748,109 +2892,4 @@ struct TutorialView: View {
         }
     }
 }
-
-#if os(iOS)
-// MARK: - Watch Handoff Screen
-
-struct WatchHandoffView: View {
-    let onStart: () -> Void
-    @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
-    @Environment(\.dismiss) private var dismiss
-    @State private var showPhoneOption = false
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 32) {
-                Spacer()
-
-                ZStack {
-                    Circle()
-                        .fill(connectivityManager.isWatchReachable
-                              ? Color.green.opacity(0.12)
-                              : Color.blue.opacity(0.12))
-                        .frame(width: 120, height: 120)
-                    Image(systemName: "applewatch")
-                        .font(.system(size: 56))
-                        .foregroundStyle(connectivityManager.isWatchReachable ? .green : .blue)
-                }
-                .animation(.easeInOut(duration: 0.4), value: connectivityManager.isWatchReachable)
-
-                VStack(spacing: 10) {
-                    if connectivityManager.isWatchReachable {
-                        Text("Apple Watch Found")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                        Text("Open the Workout Randomizer app on your Apple Watch and tap Start.")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                    } else {
-                        Text("Looking for Apple Watch…")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                        Text("Open the Workout Randomizer app on your Apple Watch to begin.")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                    }
-                }
-
-                ProgressView()
-                    .scaleEffect(1.5)
-
-                if showPhoneOption {
-                    VStack(spacing: 12) {
-                        Divider()
-                        Text("Watch app not responding")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Button {
-                            onStart()
-                            dismiss()
-                        } label: {
-                            HStack {
-                                Image(systemName: "iphone")
-                                Text("Start on iPhone")
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(.green)
-                            .foregroundStyle(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                        .padding(.horizontal)
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
-
-                Spacer()
-            }
-            .navigationTitle("Starting Workout")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-        }
-        .task {
-            connectivityManager.sendPrepareToStart()
-            try? await Task.sleep(for: .seconds(8))
-            withAnimation { showPhoneOption = true }
-        }
-        .onDisappear {
-            connectivityManager.watchRequestedStart = false
-        }
-        .onChange(of: connectivityManager.watchRequestedStart) { _, requested in
-            if requested {
-                connectivityManager.watchRequestedStart = false
-                onStart()
-                dismiss()
-            }
-        }
-    }
-}
-#endif
 

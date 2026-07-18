@@ -30,6 +30,9 @@ struct WorkoutState: Codable {
     let nextExerciseName: String?
     let isPlaying: Bool
     let isPaused: Bool
+    /// e.g. "Left Side" / "Right Side" for single-sided stretches. Optional so
+    /// old payloads still decode.
+    var sideLabel: String? = nil
 }
 
 // MARK: - Health Metrics (Watch → iPhone only)

@@ -1,5 +1,4 @@
 // WorkoutConnectivityManager.swift (watchOS)
-// WorkoutConnectivityManager.swift (watchOS)
 // Receives WatchConnectivity messages from the iOS app and drives the Watch UI
 
 #if os(watchOS)
@@ -15,6 +14,9 @@ struct WatchCompletedSummary {
     let count: Int
     let totalSeconds: Int
     let label: String
+    // Captured from the watch's own HealthKit session at completion time
+    var peakHeartRate: Double = 0
+    var activeCalories: Double = 0
 }
 
 class WorkoutConnectivityManager: NSObject, ObservableObject {
@@ -26,8 +28,27 @@ class WorkoutConnectivityManager: NSObject, ObservableObject {
     @Published var shouldPromptToStartTracking = false
     /// Set to true when iPhone sends a prepareToStart signal; shows Start button on watch
     @Published var isReadyToStart = false
+    /// True after the user taps Start on the watch, until the first workout state
+    /// arrives from the iPhone. Drives the "Starting…" screen instead of falling
+    /// back to "No Active Workout".
+    @Published var isAwaitingSessionStart = false
     /// Non-nil when the iPhone signals natural workout completion; drives the watch recap screen
     @Published var completedSummary: WatchCompletedSummary?
+
+    /// Timestamp (epoch seconds) of the most recent event applied to the UI.
+    /// Used to discard stale application contexts delivered late by the system —
+    /// the cause of the watch dropping back to "No Active Workout" mid-session.
+    private var lastEventAt: TimeInterval = 0
+    /// Timestamp of the last handled completion. Completions can arrive multiple
+    /// times (live message, application context, and inside later sessionEnded
+    /// contexts) — this de-duplicates them. Persisted so a relaunch doesn't
+    /// resurface an already-dismissed recap.
+    private var lastHandledCompletionAt: TimeInterval =
+        UserDefaults.standard.double(forKey: "lastHandledCompletionAt") {
+        didSet {
+            UserDefaults.standard.set(lastHandledCompletionAt, forKey: "lastHandledCompletionAt")
+        }
+    }
 
     private let session: WCSession? = WCSession.isSupported() ? WCSession.default : nil
 
@@ -40,8 +61,23 @@ class WorkoutConnectivityManager: NSObject, ObservableObject {
     func sendRequestStart() {
         guard let session = session, session.isReachable else { return }
         isReadyToStart = false
+        isAwaitingSessionStart = true
         let message: [String: Any] = ["type": "requestStart"]
-        session.sendMessage(message, replyHandler: nil)
+        session.sendMessage(message, replyHandler: nil) { [weak self] error in
+            print("Failed to send requestStart: \(error.localizedDescription)")
+            DispatchQueue.main.async {
+                // Fall back to the ready screen so the user can retry
+                self?.isAwaitingSessionStart = false
+                self?.isReadyToStart = true
+            }
+        }
+    }
+
+    func sendRequestStop() {
+        guard let session = session, session.isReachable else { return }
+        session.sendMessage(["type": "requestStop"], replyHandler: nil) { error in
+            print("Failed to send requestStop: \(error.localizedDescription)")
+        }
     }
 }
 
@@ -59,10 +95,8 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
         // Check for any pending applicationContext that was set while the watch was asleep
         if activationState == .activated {
             let context = session.receivedApplicationContext
-            if let data = context["workoutStatePayload"] as? Data {
-                DispatchQueue.main.async {
-                    self.decodeAndApplyState(data)
-                }
+            DispatchQueue.main.async {
+                self.applyApplicationContext(context)
             }
         }
     }
@@ -70,22 +104,77 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
     // MARK: Receive application context (delivered on wake / app launch)
 
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String : Any]) {
-        if let data = applicationContext["workoutStatePayload"] as? Data {
-            DispatchQueue.main.async {
-                self.decodeAndApplyState(data)
-            }
-        } else {
-            // Empty context means workout was stopped on the phone
-            DispatchQueue.main.async {
-                self.workoutState = nil
-            }
+        DispatchQueue.main.async {
+            self.applyApplicationContext(applicationContext)
         }
+    }
+
+    /// Applies an application context, ignoring anything older than the last
+    /// event we already handled (contexts can be delivered late, after fresher
+    /// live messages have arrived).
+    private func applyApplicationContext(_ context: [String: Any]) {
+        let sentAt = context["sentAt"] as? TimeInterval ?? 0
+        guard sentAt >= lastEventAt else { return }
+
+        if let data = context["workoutStatePayload"] as? Data {
+            lastEventAt = sentAt
+            decodeAndApplyState(data)
+            return
+        }
+
+        // A context can carry both a completion (for a watch that slept through
+        // it) and the sessionEnded marker — handle both, not either/or.
+        if let completed = context["workoutCompleted"] as? [String: Any] {
+            lastEventAt = sentAt
+            handleWorkoutCompleted(
+                count: completed["count"] as? Int ?? 0,
+                totalSeconds: completed["totalSeconds"] as? Int ?? 0,
+                label: completed["label"] as? String ?? "Workout",
+                completedAt: completed["completedAt"] as? TimeInterval ?? sentAt
+            )
+        }
+        if context["sessionEnded"] as? Bool == true {
+            lastEventAt = sentAt
+            // Session ended on the phone. Keep a completion recap if one is showing.
+            if completedSummary == nil {
+                workoutState = nil
+            }
+            isReadyToStart = false
+            isAwaitingSessionStart = false
+            WorkoutSessionManager.shared.clearPreparedConfiguration()
+        }
+        // Empty/unknown contexts are ignored — they carry no information and
+        // clearing state on them caused spurious "No Active Workout" screens.
+    }
+
+    /// Central completion handler used by all delivery paths (live message and
+    /// application context). De-duplicates on the completion's own timestamp.
+    private func handleWorkoutCompleted(count: Int, totalSeconds: Int, label: String, completedAt: TimeInterval) {
+        guard completedAt > lastHandledCompletionAt else { return }
+        lastHandledCompletionAt = completedAt
+        lastEventAt = max(lastEventAt, completedAt)
+
+        // Capture health metrics from the watch's own session before ending it
+        let sessionManager = WorkoutSessionManager.shared
+        completedSummary = WatchCompletedSummary(
+            count: count,
+            totalSeconds: totalSeconds,
+            label: label,
+            peakHeartRate: sessionManager.peakHeartRate,
+            activeCalories: sessionManager.activeCalories
+        )
+        workoutState = nil
+        isReadyToStart = false
+        isAwaitingSessionStart = false
+        sessionManager.endWorkout()
+        sessionManager.clearPreparedConfiguration()
     }
 
     // MARK: Receive live messages
 
     func session(_ session: WCSession, didReceiveMessage message: [String : Any]) {
         guard let type = message["type"] as? String else { return }
+        let sentAt = message["sentAt"] as? TimeInterval ?? Date().timeIntervalSince1970
 
         DispatchQueue.main.async {
             switch type {
@@ -93,6 +182,7 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
             // --- Workout state (full snapshot) ---
             case "workoutState":
                 if let data = message["payload"] as? Data {
+                    self.lastEventAt = max(self.lastEventAt, sentAt)
                     self.decodeAndApplyState(data)
                 }
 
@@ -113,17 +203,18 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
             case "control":
                 if let controlString = message["message"] as? String,
                    let control = ControlMessage(rawValue: controlString) {
+                    self.lastEventAt = max(self.lastEventAt, sentAt)
                     self.handleControl(control)
                 }
 
             // --- Natural workout/stretch completion ---
             case "workoutCompleted":
-                let count = message["count"] as? Int ?? 0
-                let totalSeconds = message["totalSeconds"] as? Int ?? 0
-                let label = message["label"] as? String ?? "Workout"
-                self.completedSummary = WatchCompletedSummary(count: count, totalSeconds: totalSeconds, label: label)
-                self.workoutState = nil
-                WorkoutSessionManager.shared.endWorkout()
+                self.handleWorkoutCompleted(
+                    count: message["count"] as? Int ?? 0,
+                    totalSeconds: message["totalSeconds"] as? Int ?? 0,
+                    label: message["label"] as? String ?? "Workout",
+                    completedAt: message["completedAt"] as? TimeInterval ?? sentAt
+                )
 
             // --- Handoff: iPhone ready for watch to start ---
             case "prepareToStart":
@@ -170,10 +261,30 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
             let state = try JSONDecoder().decode(WorkoutState.self, from: data)
             let wasNil = self.workoutState == nil
             self.workoutState = state
-            // Prompt to start fitness tracking when a workout first appears
-            // and the HealthKit session isn't already running
-            if wasNil && state.isPlaying && !WorkoutSessionManager.shared.isWorkoutActive {
-                self.shouldPromptToStartTracking = true
+            // A real state arrived — the handoff/starting screens are done
+            self.isReadyToStart = false
+            self.isAwaitingSessionStart = false
+            let sessionManager = WorkoutSessionManager.shared
+            if state.isPlaying && !sessionManager.isWorkoutActive,
+               let config = sessionManager.preparedConfiguration {
+                // The iPhone already declared this session via startWatchApp
+                // (handle(_:) stored the configuration) — start tracking silently,
+                // no prompt needed.
+                Task {
+                    await sessionManager.startWorkout(configuration: config)
+                }
+            } else if wasNil && state.isPlaying && !sessionManager.isWorkoutActive {
+                // No prepared configuration — the auto-launch may still be in
+                // flight, so give it a moment before prompting. This avoids a
+                // spurious alert racing the auto-start.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    if self.workoutState != nil,
+                       self.completedSummary == nil,
+                       !WorkoutSessionManager.shared.isWorkoutActive {
+                        self.shouldPromptToStartTracking = true
+                    }
+                }
             }
         } catch {
             print("Failed to decode workout state: \(error.localizedDescription)")
@@ -193,7 +304,8 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
                 isRest: state.isRest,
                 nextExerciseName: state.nextExerciseName,
                 isPlaying: state.isPlaying,
-                isPaused: state.isPaused
+                isPaused: state.isPaused,
+                sideLabel: state.sideLabel
             )
         } else {
             // Minimal placeholder so the timer is visible before a full state arrives
@@ -213,6 +325,7 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
     func dismissCompleted() {
         completedSummary = nil
         isReadyToStart = false
+        isAwaitingSessionStart = false
     }
 
     private func handleControl(_ control: ControlMessage) {
@@ -223,6 +336,9 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
             WorkoutSessionManager.shared.resumeWorkout()
         case .workoutStopped:
             WorkoutSessionManager.shared.endWorkout()
+            WorkoutSessionManager.shared.clearPreparedConfiguration()
+            isReadyToStart = false
+            isAwaitingSessionStart = false
             // Only clear workout state for manual stops; natural completion already set completedSummary
             if completedSummary == nil {
                 self.workoutState = nil

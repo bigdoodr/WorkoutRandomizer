@@ -70,7 +70,7 @@ final class ExerciseCatalog {
         // 1. Try disk cache (may be newer than bundle)
         // 2. Fall back to bundled exercises.json
         if let cached = Self.loadFromDiskCache() {
-            data = cached
+            data = Self.backfillMetadata(cached)
         } else {
             data = Self.loadBundled()
         }
@@ -83,7 +83,7 @@ final class ExerciseCatalog {
 
         do {
             let (jsonData, _) = try await URLSession.shared.data(from: Self.remoteURL)
-            let decoded = try JSONDecoder().decode(CatalogData.self, from: jsonData)
+            let decoded = Self.backfillMetadata(try JSONDecoder().decode(CatalogData.self, from: jsonData))
             // Only update if the data actually changed
             if decoded != data {
                 data = decoded
@@ -98,6 +98,47 @@ final class ExerciseCatalog {
         }
 
         isLoading = false
+    }
+
+    // MARK: - Metadata Backfill
+
+    /// The remote catalog may lag behind the app bundle and omit newer per-exercise
+    /// metadata (e.g. `singleSided`). Fill in any missing values from the bundled
+    /// catalog, matched by exercise name, so features like "Both Sides" keep working
+    /// regardless of which catalog source is active.
+    private static func backfillMetadata(_ incoming: CatalogData) -> CatalogData {
+        let bundled = loadBundled()
+
+        // Build name -> singleSided lookup from the bundle
+        var bundledSingleSided: [String: Bool] = [:]
+        for (_, difficultyDict) in bundled.exercises {
+            for (_, exerciseList) in difficultyDict {
+                for exercise in exerciseList {
+                    if let flag = exercise.singleSided {
+                        bundledSingleSided[exercise.name] = flag
+                    }
+                }
+            }
+        }
+        guard !bundledSingleSided.isEmpty else { return incoming }
+
+        let mergedExercises = incoming.exercises.mapValues { difficultyDict in
+            difficultyDict.mapValues { exerciseList in
+                exerciseList.map { exercise in
+                    CatalogExercise(
+                        name: exercise.name,
+                        videoPath: exercise.videoPath,
+                        equipment: exercise.equipment,
+                        singleSided: exercise.singleSided ?? bundledSingleSided[exercise.name]
+                    )
+                }
+            }
+        }
+        return CatalogData(
+            focusAreas: incoming.focusAreas,
+            difficulties: incoming.difficulties,
+            exercises: mergedExercises
+        )
     }
 
     // MARK: - Bundled Fallback

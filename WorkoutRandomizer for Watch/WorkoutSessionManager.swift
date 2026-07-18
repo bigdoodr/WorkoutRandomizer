@@ -16,9 +16,25 @@ class WorkoutSessionManager: NSObject, ObservableObject {
     @Published var isWorkoutActive = false
     @Published var heartRate: Double = 0
     @Published var activeCalories: Double = 0
+    @Published var peakHeartRate: Double = 0
     
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
+    /// Guards against two concurrent start requests (e.g. the watch Start button
+    /// and the iPhone's startWatchApp racing each other).
+    private var isStartingSession = false
+    /// Configuration delivered by the iPhone via startWatchApp → handle(_:).
+    /// Held until the user (or an incoming playing state) actually starts the
+    /// session, so launching the watch app doesn't record a session prematurely.
+    private(set) var preparedConfiguration: HKWorkoutConfiguration?
+
+    func prepare(configuration: HKWorkoutConfiguration) {
+        preparedConfiguration = configuration
+    }
+
+    func clearPreparedConfiguration() {
+        preparedConfiguration = nil
+    }
     
     private override init() {
         super.init()
@@ -49,7 +65,13 @@ class WorkoutSessionManager: NSObject, ObservableObject {
     // MARK: - Workout Lifecycle
     
     func startWorkout(configuration: HKWorkoutConfiguration? = nil) async {
-        let config = configuration ?? defaultConfiguration()
+        // Avoid creating a second session when one is already running or starting
+        // (e.g. the user started from the watch AND the iPhone triggered startWatchApp).
+        guard session == nil, !isStartingSession else { return }
+        isStartingSession = true
+        defer { isStartingSession = false }
+
+        let config = configuration ?? preparedConfiguration ?? defaultConfiguration()
         
         // Request authorization first
         let authorized = await requestAuthorization()
@@ -118,11 +140,13 @@ class WorkoutSessionManager: NSObject, ObservableObject {
     private func resetWorkout() {
         session = nil
         builder = nil
+        preparedConfiguration = nil
         
         DispatchQueue.main.async {
             self.isWorkoutActive = false
             self.heartRate = 0
             self.activeCalories = 0
+            self.peakHeartRate = 0
         }
     }
 }
@@ -170,6 +194,9 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
                     case HKQuantityType.quantityType(forIdentifier: .heartRate):
                         let heartRateUnit = HKUnit.count().unitDivided(by: .minute())
                         self.heartRate = statistics.mostRecentQuantity()?.doubleValue(for: heartRateUnit) ?? 0
+                        if self.heartRate > self.peakHeartRate {
+                            self.peakHeartRate = self.heartRate
+                        }
                     case HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned):
                         let energyUnit = HKUnit.kilocalorie()
                         self.activeCalories = statistics.sumQuantity()?.doubleValue(for: energyUnit) ?? 0

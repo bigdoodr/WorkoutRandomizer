@@ -2,6 +2,9 @@ import SwiftUI
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
+#if canImport(HealthKit)
+import HealthKit
+#endif
 #if os(macOS)
 import AppKit
 #endif
@@ -19,10 +22,6 @@ struct StretchRoutineView: View {
     @State private var generatedStretches: [Exercise] = []
     @State private var showingPlayer = false
     @State private var completedStretchSession = false
-#if os(iOS)
-    @State private var showingWatchHandoff = false
-    @State private var startStretchAfterHandoff = false
-#endif
 
     private let holdDurationOptions = [10, 15, 20, 30]
 
@@ -257,11 +256,7 @@ struct StretchRoutineView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
 
                         Button {
-#if os(iOS)
-                            showingWatchHandoff = true
-#else
                             showingPlayer = true
-#endif
                         } label: {
                             HStack {
                                 Image(systemName: "play.fill")
@@ -292,18 +287,6 @@ struct StretchRoutineView: View {
                 onComplete: { completedStretchSession = true }
             )
         }
-#if os(iOS)
-        .sheet(isPresented: $showingWatchHandoff, onDismiss: {
-            if startStretchAfterHandoff {
-                startStretchAfterHandoff = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    showingPlayer = true
-                }
-            }
-        }) {
-            WatchHandoffView { startStretchAfterHandoff = true }
-        }
-#endif
         .onAppear {
             if selectedCategories.isEmpty, let first = stretchCategories.first {
                 selectedCategories = [first]
@@ -469,6 +452,19 @@ struct StretchPlayerView: View {
                 Spacer()
 
                 // Controls
+#if os(iOS)
+                if !isPlaying {
+                    let watchMsg: String = {
+                        if connectivityManager.isWatchReachable { return "You can also start from your Apple Watch" }
+                        if connectivityManager.isWatchConnected { return "Watch Connected" }
+                        return "Looking for Watch…"
+                    }()
+                    Label(watchMsg, systemImage: "applewatch")
+                        .font(.caption)
+                        .foregroundStyle(connectivityManager.isWatchReachable ? .secondary : .tertiary)
+                        .padding(.bottom, 4)
+                }
+#endif
                 HStack(spacing: 40) {
                     if !isPlaying {
                         Button { startRoutine() } label: {
@@ -503,8 +499,29 @@ struct StretchPlayerView: View {
             }
 #endif
         }
-        .onAppear { timeRemaining = holdDuration }
+        .onAppear {
+            timeRemaining = holdDuration
+            prepareWatchHandoff()
+        }
         .onDisappear { stopRoutine() }
+#if os(iOS)
+        // The Apple Watch tapped Start — begin with a "Get Ready" lead-in
+        .onChange(of: connectivityManager.watchRequestedStart) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedStart = false
+                if !isPlaying {
+                    startRoutine(withLeadIn: true)
+                }
+            }
+        }
+        // The Apple Watch tapped End Workout — stop the routine on the iPhone too
+        .onChange(of: connectivityManager.watchRequestedStop) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedStop = false
+                if isPlaying { stopRoutine(); dismiss() }
+            }
+        }
+#endif
         .sheet(isPresented: $showingRecap) {
             StretchRecapView(
                 stretches: stretches,
@@ -533,19 +550,28 @@ struct StretchPlayerView: View {
         .clipShape(Circle())
     }
 
-    private func startRoutine() {
+    private func startRoutine(withLeadIn leadIn: Bool = false) {
         isPlaying = true
-        isTransitioning = false
         currentSide = 0
-        timeRemaining = holdDuration
+        if leadIn {
+            // Brief "Get Ready" countdown so the user can get into position
+            isTransitioning = true
+            timeRemaining = Self.transitionDuration
+        } else {
+            isTransitioning = false
+            timeRemaining = holdDuration
+        }
+        setIdleTimer(disabled: true)
         startTimer()
         playFeedback(.start)
         sendWorkoutStateToWatch()
+        launchWatchWorkoutSession()
     }
 
     private func togglePause() {
         isPaused.toggle()
         sendWorkoutStateToWatch()
+        sendControlToWatch(isPaused ? .workoutPaused : .workoutResumed)
     }
 
     private func skipCurrent() { advance() }
@@ -565,6 +591,7 @@ struct StretchPlayerView: View {
             currentSide = 1
             timeRemaining = holdDuration
             playFeedback(.start)
+            sendWorkoutStateToWatch()
             return
         }
 
@@ -608,10 +635,51 @@ struct StretchPlayerView: View {
     private func stopRoutine() {
         timer?.invalidate()
         timer = nil
+        setIdleTimer(disabled: false)
         sendControlToWatch(.workoutStopped)
 #if canImport(AVFoundation)
         playerNode?.stop()
         audioEngine?.stop()
+#endif
+    }
+
+    /// Keeps the screen awake during a stretch session (iOS only).
+    private func setIdleTimer(disabled: Bool) {
+#if os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = disabled
+#endif
+    }
+
+    /// Called when the player appears: auto-launches the watch app (via
+    /// startWatchApp) so its Ready screen comes up without the user having to
+    /// open it manually, and signals readiness over WatchConnectivity.
+    private func prepareWatchHandoff() {
+#if os(iOS)
+        guard !isPlaying else { return }
+        connectivityManager.watchRequestedStart = false
+        connectivityManager.sendPrepareToStart()
+        launchWatchWorkoutSession()
+#endif
+    }
+
+    /// Launches the watch app with a flexibility workout configuration so the
+    /// HealthKit session starts automatically — mirroring the workout player's
+    /// behavior for a consistent experience. If the watch already started its
+    /// own session (via its Start button), the watch ignores the duplicate.
+    private func launchWatchWorkoutSession() {
+#if os(iOS)
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        let store = HKHealthStore()
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = .flexibility
+        configuration.locationType = .indoor
+        store.startWatchApp(with: configuration) { success, error in
+            if let error = error {
+                print("Failed to launch watch app: \(error.localizedDescription)")
+            } else if success {
+                print("Watch app launched for stretch session")
+            }
+        }
 #endif
     }
 
@@ -806,7 +874,8 @@ struct StretchPlayerView: View {
             isRest: isTransitioning,
             nextExerciseName: isTransitioning ? currentStretch?.name : nextName,
             isPlaying: isPlaying,
-            isPaused: isPaused
+            isPaused: isPaused,
+            sideLabel: sideLabel
         )
         connectivityManager.sendWorkoutState(state)
         #endif

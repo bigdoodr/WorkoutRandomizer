@@ -19,9 +19,19 @@ class AppDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func handle(_ workoutConfiguration: HKWorkoutConfiguration) {
-        // Called by the system when the iPhone triggers HKHealthStore.startWatchApp(with:)
-        Task {
-            await WorkoutSessionManager.shared.startWorkout(configuration: workoutConfiguration)
+        // Called by the system when the iPhone triggers HKHealthStore.startWatchApp(with:).
+        // The iPhone now calls this as soon as its player screen appears (to launch
+        // the watch app), so don't start recording yet — stash the configuration and
+        // show the Ready screen. If the routine is already playing on the phone
+        // (started there first), begin tracking immediately.
+        Task { @MainActor in
+            let sessionManager = WorkoutSessionManager.shared
+            sessionManager.prepare(configuration: workoutConfiguration)
+            if WorkoutConnectivityManager.shared.workoutState?.isPlaying == true {
+                await sessionManager.startWorkout(configuration: workoutConfiguration)
+            } else if WorkoutConnectivityManager.shared.completedSummary == nil {
+                WorkoutConnectivityManager.shared.isReadyToStart = true
+            }
         }
     }
 
