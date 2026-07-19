@@ -813,6 +813,21 @@ struct SavedRoutinePlayerView: View {
 
     private func playBeep(type: FeedbackEvent) {
         triggerHaptic(for: type)
+#if os(macOS)
+        switch type {
+        case .start:
+            NSSound.beep()
+        case .warning:
+            NSSound.beep(); NSSound.beep()
+        case .end:
+            NSSound.beep(); DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { NSSound.beep() }
+        case .complete:
+            NSSound.beep()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { NSSound.beep() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { NSSound.beep() }
+        }
+        return
+#endif
 #if canImport(AVFoundation)
     #if os(iOS) || os(tvOS) || os(visionOS)
         DispatchQueue.global(qos: .utility).async {
