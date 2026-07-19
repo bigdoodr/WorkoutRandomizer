@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
@@ -8,13 +9,13 @@ import HealthKit
 
 // MARK: - Models
 
-enum SavedMoveType: String {
+enum SavedMoveType: String, Codable {
     case hold = "Hold"
     case move = "Move"
 }
 
-struct SavedRoutineExercise: Identifiable {
-    let id = UUID()
+struct SavedRoutineExercise: Identifiable, Codable {
+    var id = UUID()
     let name: String
     let duration: Int           // work/hold seconds per side
     let restDuration: Int       // rest after exercise (or after each side if restAfterEachSide)
@@ -39,18 +40,33 @@ struct SavedRoutineExercise: Identifiable {
     }
 }
 
-struct SavedWorkoutRoutine: Identifiable {
-    let id = UUID()
+struct SavedWorkoutRoutine: Identifiable, Codable {
+    var id = UUID()
     let name: String
     let routineDescription: String
     let source: String
     let sourceURL: String
     let exercises: [SavedRoutineExercise]
-    let accentColor: Color
+    let accentColorName: String
+    let systemImage: String
+
+    var accentColor: Color {
+        switch accentColorName {
+        case "yellow":  return .yellow
+        case "orange":  return .orange
+        case "indigo":  return .indigo
+        case "purple":  return .purple
+        case "green":   return .green
+        case "teal":    return .teal
+        case "red":     return .red
+        case "pink":    return .pink
+        default:        return .blue
+        }
+    }
 
     var totalDurationSeconds: Int {
         exercises.reduce(0) { total, ex in
-            let sides = (ex.singleSided) ? 2 : 1
+            let sides = ex.singleSided ? 2 : 1
             let work = ex.duration * sides
             let rest: Int
             if ex.singleSided && ex.restAfterEachSide {
@@ -67,6 +83,44 @@ struct SavedWorkoutRoutine: Identifiable {
         let m = s / 60
         let sec = s % 60
         return sec == 0 ? "\(m) min" : "\(m)m \(sec)s"
+    }
+}
+
+// MARK: - Saved Routine Store
+
+@MainActor
+@Observable
+final class SavedRoutineStore {
+    static let shared = SavedRoutineStore()
+    private static let storageKey = "userSavedRoutines_v1"
+
+    private(set) var routines: [SavedWorkoutRoutine] = []
+
+    private init() {
+        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
+           let decoded = try? JSONDecoder().decode([SavedWorkoutRoutine].self, from: data) {
+            routines = decoded
+        }
+    }
+
+    func save(_ routine: SavedWorkoutRoutine) {
+        if let idx = routines.firstIndex(where: { $0.id == routine.id }) {
+            routines[idx] = routine
+        } else {
+            routines.append(routine)
+        }
+        persist()
+    }
+
+    func delete(at offsets: IndexSet) {
+        routines.remove(atOffsets: offsets)
+        persist()
+    }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(routines) {
+            UserDefaults.standard.set(data, forKey: Self.storageKey)
+        }
     }
 }
 
@@ -87,7 +141,8 @@ enum PreloadedRoutines {
             SavedRoutineExercise(name: "Hip Switch & Lean",     duration: 30, singleSided: true,  moveType: .hold),
             SavedRoutineExercise(name: "London Bridge",         duration: 30, singleSided: true,  moveType: .move),
         ],
-        accentColor: .yellow
+        accentColorName: "yellow",
+        systemImage: "sunrise.fill"
     )
 
     static let bedtimeStretches = SavedWorkoutRoutine(
@@ -98,11 +153,12 @@ enum PreloadedRoutines {
         exercises: [
             SavedRoutineExercise(name: "Calf & Hamstring Wall Stretch", duration: 30, singleSided: true,  moveType: .hold),
             SavedRoutineExercise(name: "Child's Pose",                  duration: 30, singleSided: false, moveType: .hold),
-            SavedRoutineExercise(name: "Lifted Hands Child's Pose",     duration: 30, singleSided: false, moveType: .hold),
+            SavedRoutineExercise(name: "Raised Forearms Child's Pose",   duration: 30, singleSided: false, moveType: .hold),
             SavedRoutineExercise(name: "Modified Pigeon Pose",          duration: 30, singleSided: true,  moveType: .hold),
             SavedRoutineExercise(name: "Supine Spinal Twist",           duration: 30, singleSided: true,  moveType: .hold),
         ],
-        accentColor: .indigo
+        accentColorName: "indigo",
+        systemImage: "moon.stars.fill"
     )
 
     static let absWorkout = SavedWorkoutRoutine(
@@ -120,65 +176,87 @@ enum PreloadedRoutines {
             SavedRoutineExercise(name: "Side Scissor Crunches",  duration: 45, restDuration: 15, singleSided: true,  restAfterEachSide: true,  moveType: .move),
             SavedRoutineExercise(name: "Corpse Crunch",          duration: 45, restDuration: 0,  singleSided: false, restAfterEachSide: false, moveType: .move),
         ],
-        accentColor: .orange
+        accentColorName: "orange",
+        systemImage: "figure.core.training"
     )
 }
 
 // MARK: - Saved Routines List
 
 struct SavedRoutinesView: View {
-    private let routines = PreloadedRoutines.all
+    private let preloaded = PreloadedRoutines.all
+    @State private var store = SavedRoutineStore.shared
 
     var body: some View {
         List {
             Section {
-                ForEach(routines) { routine in
+                ForEach(preloaded) { routine in
                     NavigationLink(destination: SavedRoutineDetailView(routine: routine)) {
-                        HStack(spacing: 14) {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(routine.accentColor)
-                                .frame(width: 44, height: 44)
-                                .overlay {
-                                    Image(systemName: routine.accentColor == .orange ? "figure.core.training" :
-                                          routine.accentColor == .yellow ? "sunrise.fill" : "moon.stars.fill")
-                                        .foregroundStyle(.white)
-                                        .font(.title3)
-                                }
-
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(routine.name)
-                                    .font(.body)
-                                    .fontWeight(.medium)
-                                HStack(spacing: 6) {
-                                    Text(routine.source)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text("·")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text("\(routine.exercises.count) exercises")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text("·")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text(routine.formattedDuration)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
+                        RoutineRow(routine: routine)
                     }
                 }
             } header: {
                 Text("Athlean-X Routines")
             } footer: {
-                Text("More routines coming soon. Import your own via the Export button on any generated workout.")
-                    .font(.caption)
+                if store.routines.isEmpty {
+                    Text("Save any generated workout to \"My Routines\" using the bookmark button.")
+                        .font(.caption)
+                }
+            }
+
+            if !store.routines.isEmpty {
+                Section("My Routines") {
+                    ForEach(store.routines) { routine in
+                        NavigationLink(destination: SavedRoutineDetailView(routine: routine)) {
+                            RoutineRow(routine: routine)
+                        }
+                    }
+                    .onDelete { offsets in store.delete(at: offsets) }
+                }
             }
         }
         .navigationTitle("Saved Routines")
+    }
+}
+
+private struct RoutineRow: View {
+    let routine: SavedWorkoutRoutine
+
+    var body: some View {
+        HStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(routine.accentColor)
+                .frame(width: 44, height: 44)
+                .overlay {
+                    Image(systemName: routine.systemImage)
+                        .foregroundStyle(.white)
+                        .font(.title3)
+                }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(routine.name)
+                    .font(.body)
+                    .fontWeight(.medium)
+                HStack(spacing: 6) {
+                    Text(routine.source)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("·")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(routine.exercises.count) exercises")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("·")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(routine.formattedDuration)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -215,9 +293,11 @@ struct SavedRoutineDetailView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text(routine.routineDescription)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if !routine.routineDescription.isEmpty {
+                        Text(routine.routineDescription)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                     if !routine.sourceURL.isEmpty, let url = URL(string: routine.sourceURL) {
                         Link(destination: url) {
                             Label("Watch on YouTube", systemImage: "play.rectangle.fill")
@@ -337,10 +417,13 @@ struct SavedRoutinePlayerView: View {
     @State private var showingRecap = false
     @Environment(\.dismiss) private var dismiss
     @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
+    @StateObject private var videoManager = VideoManager.shared
 
 #if canImport(AVFoundation)
     @State private var audioEngine: AVAudioEngine?
     @State private var playerNode: AVAudioPlayerNode?
+    @State private var avPlayer: AVPlayer?
+    @State private var playerEndObserver: Any?
 #endif
 
     private var currentStep: PlayerStep? {
@@ -353,66 +436,98 @@ struct SavedRoutinePlayerView: View {
         return Double(timeRemaining) / Double(step.duration)
     }
 
+    private var videoURL: URL? {
+        guard let step = currentStep, !step.isRest else { return nil }
+        return VideoManager.shared.url(for: step.label)
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                VStack(spacing: 20) {
-                    Spacer(minLength: 0)
+                ScrollView {
+                    VStack(spacing: 16) {
+                        Spacer(minLength: 8)
 
-                    // Step name
-                    VStack(spacing: 6) {
-                        if let step = currentStep {
-                            if let side = step.sideLabel {
-                                Text(side)
-                                    .font(.subheadline)
-                                    .foregroundStyle(routine.accentColor)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 4)
-                                    .background(routine.accentColor.opacity(0.12))
-                                    .clipShape(Capsule())
-                            }
-                            Text(step.label)
-                                .font(.largeTitle)
-                                .fontWeight(.bold)
-                                .multilineTextAlignment(.center)
+                        // Video area
+                        if let mode = VideoMode(rawValue: videoManager.videoMode), mode != .none {
+#if canImport(AVFoundation)
+                            if let player = avPlayer {
+                                VideoPlayer(player: player)
+                                    .frame(height: 180)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .padding(.horizontal)
+                            } else if let step = currentStep, !step.isRest {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.gray.opacity(0.08))
+                                    VStack(spacing: 6) {
+                                        Image(systemName: "video.slash")
+                                            .font(.title)
+                                            .foregroundStyle(.secondary)
+                                        Text("No Video Available")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(height: 180)
                                 .padding(.horizontal)
-                        } else {
-                            Text("Complete!")
-                                .font(.largeTitle)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.green)
+                            }
+#endif
                         }
-                    }
 
-                    // Timer ring
-                    ZStack {
-                        Circle()
-                            .stroke(Color.gray.opacity(0.15), lineWidth: 10)
-                        Circle()
-                            .trim(from: 0, to: timerProgress)
-                            .stroke(
-                                currentStep?.isRest == true ? Color.blue : routine.accentColor,
-                                style: StrokeStyle(lineWidth: 10, lineCap: .round)
-                            )
-                            .rotationEffect(.degrees(-90))
-                            .animation(.linear(duration: 1), value: timeRemaining)
-                        Text(isPlaying ? "\(timeRemaining)" : "\(currentStep?.duration ?? 0)")
-                            .font(.system(size: 64, weight: .bold, design: .monospaced))
-                            .foregroundStyle(timeRemaining <= 3 && isPlaying ? .red : .primary)
-                    }
-                    .frame(width: 180, height: 180)
+                        // Step name
+                        VStack(spacing: 6) {
+                            if let step = currentStep {
+                                if let side = step.sideLabel {
+                                    Text(side)
+                                        .font(.subheadline)
+                                        .foregroundStyle(routine.accentColor)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 4)
+                                        .background(routine.accentColor.opacity(0.12))
+                                        .clipShape(Capsule())
+                                }
+                                Text(step.label)
+                                    .font(.largeTitle)
+                                    .fontWeight(.bold)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal)
+                            } else {
+                                Text("Complete!")
+                                    .font(.largeTitle)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.green)
+                            }
+                        }
 
-                    // Progress
-                    if !steps.isEmpty {
-                        Text("Step \(min(currentIndex + 1, steps.count)) of \(steps.count)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+                        // Timer ring
+                        ZStack {
+                            Circle()
+                                .stroke(Color.gray.opacity(0.15), lineWidth: 10)
+                            Circle()
+                                .trim(from: 0, to: timerProgress)
+                                .stroke(
+                                    currentStep?.isRest == true ? Color.blue : routine.accentColor,
+                                    style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                                )
+                                .rotationEffect(.degrees(-90))
+                                .animation(.linear(duration: 1), value: timeRemaining)
+                            Text(isPlaying ? "\(timeRemaining)" : "\(currentStep?.duration ?? 0)")
+                                .font(.system(size: 64, weight: .bold, design: .monospaced))
+                                .foregroundStyle(timeRemaining <= 3 && isPlaying ? .red : .primary)
+                        }
+                        .frame(width: 180, height: 180)
 
-                    Spacer(minLength: 0)
+                        // Progress
+                        if !steps.isEmpty {
+                            Text("Step \(min(currentIndex + 1, steps.count)) of \(steps.count)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer(minLength: 8)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
 
                 // Controls
                 VStack(spacing: 6) {
@@ -472,6 +587,7 @@ struct SavedRoutinePlayerView: View {
             if let first = steps.first { timeRemaining = first.duration }
             setupAudio()
             prepareWatchHandoff()
+            prepareVideoForCurrentStep(autoplay: false)
         }
         .onDisappear { stopRoutine() }
 #if os(iOS)
@@ -526,6 +642,7 @@ struct SavedRoutinePlayerView: View {
         playBeep(type: .start)
         sendWorkoutStateToWatch()
         launchWatchWorkoutSession()
+        prepareVideoForCurrentStep(autoplay: true)
     }
 
     private func togglePause() {
@@ -533,8 +650,14 @@ struct SavedRoutinePlayerView: View {
         if isPaused {
             timer?.invalidate()
             timer = nil
+#if canImport(AVFoundation)
+            avPlayer?.pause()
+#endif
         } else {
             scheduleTimer()
+#if canImport(AVFoundation)
+            avPlayer?.play()
+#endif
         }
         sendWorkoutStateToWatch()
         sendControlToWatch(isPaused ? .workoutPaused : .workoutResumed)
@@ -550,6 +673,14 @@ struct SavedRoutinePlayerView: View {
         isPlaying = false
         setIdleTimer(disabled: false)
         sendControlToWatch(.workoutStopped)
+#if canImport(AVFoundation)
+        avPlayer?.pause()
+        avPlayer = nil
+        if let obs = playerEndObserver {
+            NotificationCenter.default.removeObserver(obs)
+            playerEndObserver = nil
+        }
+#endif
     }
 
     private func scheduleTimer() {
@@ -578,6 +709,7 @@ struct SavedRoutinePlayerView: View {
             currentIndex = next
             timeRemaining = steps[next].duration
             sendWorkoutStateToWatch()
+            prepareVideoForCurrentStep(autoplay: true)
         } else {
             timer?.invalidate()
             timer = nil
@@ -585,10 +717,57 @@ struct SavedRoutinePlayerView: View {
             setIdleTimer(disabled: false)
             playBeep(type: .complete)
             sendControlToWatch(.workoutStopped)
+#if canImport(AVFoundation)
+            avPlayer?.pause()
+            avPlayer = nil
+            if let obs = playerEndObserver {
+                NotificationCenter.default.removeObserver(obs)
+                playerEndObserver = nil
+            }
+#endif
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 showingRecap = true
             }
         }
+    }
+
+    private func prepareVideoForCurrentStep(autoplay: Bool) {
+#if canImport(AVFoundation)
+        if let obs = playerEndObserver {
+            NotificationCenter.default.removeObserver(obs)
+            playerEndObserver = nil
+        }
+        guard let step = currentStep, !step.isRest,
+              let url = VideoManager.shared.url(for: step.label) else {
+            avPlayer?.pause()
+            avPlayer = nil
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let item = AVPlayerItem(url: url)
+            DispatchQueue.main.async {
+                let player: AVPlayer
+                if let existing = self.avPlayer {
+                    existing.replaceCurrentItem(with: item)
+                    player = existing
+                } else {
+                    player = AVPlayer(playerItem: item)
+                    player.isMuted = true
+                    player.actionAtItemEnd = .none
+                }
+                self.playerEndObserver = NotificationCenter.default.addObserver(
+                    forName: .AVPlayerItemDidPlayToEndTime,
+                    object: item,
+                    queue: .main
+                ) { _ in
+                    player.seek(to: .zero)
+                    player.play()
+                }
+                self.avPlayer = player
+                if autoplay { player.play() }
+            }
+        }
+#endif
     }
 
     private func setIdleTimer(disabled: Bool) {
