@@ -283,6 +283,7 @@ struct WorkoutGeneratorView: View {
     @State private var customExerciseStore = CustomExerciseStore.shared
     @State private var showCustomTimers = false
     @State private var exerciseDurationOverrides: [Int: Int] = [:]
+    @State private var showSaveConfirmation = false
 
     @StateObject private var videoManager = VideoManager.shared
     @State private var catalog = ExerciseCatalog.shared
@@ -1032,7 +1033,7 @@ struct WorkoutGeneratorView: View {
                                 .background(.gray.opacity(0.1))
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                                 
-                                HStack(spacing: 12) {
+                                VStack(spacing: 8) {
                                     Button {
                                         showingWorkout = true
                                     } label: {
@@ -1046,19 +1047,35 @@ struct WorkoutGeneratorView: View {
                                         .foregroundStyle(.white)
                                         .clipShape(RoundedRectangle(cornerRadius: 10))
                                     }
-                                    
-                                    Button {
-                                        exportWorkout()
-                                    } label: {
-                                        HStack {
-                                            Image(systemName: "square.and.arrow.up")
-                                            Text("Export")
+
+                                    HStack(spacing: 8) {
+                                        Button {
+                                            exportWorkout()
+                                        } label: {
+                                            HStack {
+                                                Image(systemName: "square.and.arrow.up")
+                                                Text("Export")
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(.blue)
+                                            .foregroundStyle(.white)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
                                         }
-                                        .frame(maxWidth: .infinity)
-                                        .padding()
-                                        .background(.blue)
-                                        .foregroundStyle(.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                                        Button {
+                                            saveGeneratedRoutine()
+                                        } label: {
+                                            HStack {
+                                                Image(systemName: "bookmark.fill")
+                                                Text("Save")
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(.purple)
+                                            .foregroundStyle(.white)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                        }
                                     }
                                 }
                             }
@@ -1129,6 +1146,11 @@ struct WorkoutGeneratorView: View {
         }
         .sheet(isPresented: $showingTutorial) {
             TutorialView()
+        }
+        .alert("Routine Saved", isPresented: $showSaveConfirmation) {
+            Button("OK") { }
+        } message: {
+            Text("This workout has been added to My Routines in the Saved Routines tab.")
         }
         .fileExporter(
             isPresented: $showingExporter,
@@ -1390,6 +1412,47 @@ struct WorkoutGeneratorView: View {
         }
     }
     
+    private func saveGeneratedRoutine() {
+        var savedExercises: [SavedRoutineExercise] = []
+        for (i, ex) in generatedRoutine.enumerated() {
+            if ex.name == "Rest" {
+                let restDur = exerciseDurationOverrides[i] ?? restDuration
+                if !savedExercises.isEmpty {
+                    let last = savedExercises[savedExercises.count - 1]
+                    savedExercises[savedExercises.count - 1] = SavedRoutineExercise(
+                        name: last.name,
+                        duration: last.duration,
+                        restDuration: restDur,
+                        singleSided: last.singleSided,
+                        moveType: last.moveType
+                    )
+                }
+            } else {
+                let dur = exerciseDurationOverrides[i] ?? exerciseDuration
+                savedExercises.append(SavedRoutineExercise(
+                    name: ex.name,
+                    duration: dur,
+                    restDuration: 0,
+                    singleSided: ex.singleSided,
+                    moveType: .move
+                ))
+            }
+        }
+        let focusLabel = selectedFocusAreas.sorted().prefix(2).joined(separator: " & ")
+        let routineName = focusLabel.isEmpty ? "My Workout" : "\(focusLabel) Workout"
+        let routine = SavedWorkoutRoutine(
+            name: routineName,
+            routineDescription: "",
+            source: "My Routines",
+            sourceURL: "",
+            exercises: savedExercises,
+            accentColorName: "purple",
+            systemImage: "dumbbell.fill"
+        )
+        SavedRoutineStore.shared.save(routine)
+        showSaveConfirmation = true
+    }
+
     private func importWorkout(from document: WorkoutDocument) {
         var importedRoutine: [Exercise] = []
         var didSetDurations = false
