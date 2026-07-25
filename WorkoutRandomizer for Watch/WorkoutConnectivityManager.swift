@@ -324,7 +324,9 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
 
     func dismissCompleted() {
         completedSummary = nil
-        isReadyToStart = false
+        // Do NOT reset isReadyToStart here — a prepareToStart for the next routine
+        // may have already arrived while the recap was visible. Clearing it would
+        // drop the watch to "No Active Workout" instead of showing "Start Workout".
         isAwaitingSessionStart = false
     }
 
