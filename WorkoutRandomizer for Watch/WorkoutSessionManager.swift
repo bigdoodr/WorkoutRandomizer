@@ -103,18 +103,20 @@ class WorkoutSessionManager: NSObject, ObservableObject {
 
         // Use the user's preferred HR zone config if one exists; otherwise install
         // a standard 5-zone fallback so zone tracking is always active.
-        let hrType = HKQuantityType(.heartRate)
-        let existingConfig = try? await builder.zoneConfiguration(for: hrType)
-        if existingConfig == nil {
-            let bpm = HKUnit.count().unitDivided(by: .minute())
-            let boundaries: [HKQuantity] = [
-                HKQuantity(unit: bpm, doubleValue: 114),  // Z1/Z2 ~60% of 190 max
-                HKQuantity(unit: bpm, doubleValue: 133),  // Z2/Z3 ~70%
-                HKQuantity(unit: bpm, doubleValue: 152),  // Z3/Z4 ~80%
-                HKQuantity(unit: bpm, doubleValue: 171),  // Z4/Z5 ~90%
-            ]
-            let fallback = HKWorkoutZoneConfiguration(quantityType: hrType, zoneBoundaries: boundaries)
-            try? await builder.setCustomZoneConfiguration(fallback, for: hrType)
+        if #available(watchOS 27, *) {
+            let hrType = HKQuantityType(.heartRate)
+            let existingConfig = try? await builder.zoneConfiguration(for: hrType)
+            if existingConfig == nil {
+                let bpm = HKUnit.count().unitDivided(by: .minute())
+                let boundaries: [HKQuantity] = [
+                    HKQuantity(unit: bpm, doubleValue: 114),  // Z1/Z2 ~60% of 190 max
+                    HKQuantity(unit: bpm, doubleValue: 133),  // Z2/Z3 ~70%
+                    HKQuantity(unit: bpm, doubleValue: 152),  // Z3/Z4 ~80%
+                    HKQuantity(unit: bpm, doubleValue: 171),  // Z4/Z5 ~90%
+                ]
+                let fallback = HKWorkoutZoneConfiguration(quantityType: hrType, zoneBoundaries: boundaries)
+                try? await builder.setCustomZoneConfiguration(fallback, for: hrType)
+            }
         }
 
         do {
@@ -172,6 +174,7 @@ class WorkoutSessionManager: NSObject, ObservableObject {
     // Snapshots current zone durations from the live builder for use in the
     // recap. Must be called before endWorkout() tears the builder down.
     func captureCurrentHRZones() -> [(name: String, seconds: TimeInterval)] {
+        guard #available(watchOS 27, *) else { return [] }
         guard let group = builder?.zoneGroup(for: HKQuantityType(.heartRate)) else { return [] }
         let bpm = HKUnit.count().unitDivided(by: .minute())
         return group.zoneDurations.map { dur in
@@ -256,6 +259,7 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
 
     // MARK: - Live zone tracking
 
+    @available(watchOS 27, *)
     func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didUpdateWorkoutZone zoneUpdate: HKLiveWorkoutBuilder.ZoneUpdate) {
         let newIndex = zoneUpdate.newZoneDuration?.zone.index
         DispatchQueue.main.async {
