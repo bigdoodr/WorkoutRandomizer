@@ -17,6 +17,7 @@ struct WatchCompletedSummary {
     // Captured from the watch's own HealthKit session at completion time
     var peakHeartRate: Double = 0
     var activeCalories: Double = 0
+    var hrZoneDurations: [(name: String, seconds: TimeInterval)] = []
 }
 
 class WorkoutConnectivityManager: NSObject, ObservableObject {
@@ -154,20 +155,34 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
         lastHandledCompletionAt = completedAt
         lastEventAt = max(lastEventAt, completedAt)
 
-        // Capture health metrics from the watch's own session before ending it
+        // Capture health metrics and zone data before ending the session
         let sessionManager = WorkoutSessionManager.shared
+        let zones = sessionManager.captureCurrentHRZones()
         completedSummary = WatchCompletedSummary(
             count: count,
             totalSeconds: totalSeconds,
             label: label,
             peakHeartRate: sessionManager.peakHeartRate,
-            activeCalories: sessionManager.activeCalories
+            activeCalories: sessionManager.activeCalories,
+            hrZoneDurations: zones
         )
         workoutState = nil
         isReadyToStart = false
         isAwaitingSessionStart = false
         sessionManager.endWorkout()
         sessionManager.clearPreparedConfiguration()
+
+        // Relay zone data to iPhone so it can appear in the iOS recap
+        sendZoneDataToPhone(zones)
+    }
+
+    private func sendZoneDataToPhone(_ zones: [(name: String, seconds: TimeInterval)]) {
+        guard let session = session, session.isReachable, !zones.isEmpty else { return }
+        let payload = zones.map { ["name": $0.name, "seconds": $0.seconds] as [String: Any] }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        session.sendMessage(["type": "zoneData", "payload": data], replyHandler: nil) { error in
+            print("Failed to send zone data to iPhone: \(error.localizedDescription)")
+        }
     }
 
     // MARK: Receive live messages

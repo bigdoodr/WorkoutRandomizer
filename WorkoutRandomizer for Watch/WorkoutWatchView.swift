@@ -104,6 +104,27 @@ struct WorkoutWatchView: View {
                     }
                 }
 
+                if !summary.hrZoneDurations.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Time in Zone")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ForEach(Array(summary.hrZoneDurations.enumerated()), id: \.offset) { idx, entry in
+                            HStack {
+                                Text(entry.name)
+                                    .font(.caption2)
+                                    .foregroundStyle(zoneColor(idx))
+                                Spacer()
+                                Text(formattedTime(Int(entry.seconds)))
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+
                 Button("Done") {
                     connectivityManager.dismissCompleted()
                 }
@@ -117,6 +138,16 @@ struct WorkoutWatchView: View {
 
     private func formattedTime(_ seconds: Int) -> String {
         String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private func zoneColor(_ index: Int) -> Color {
+        switch index {
+        case 0: return .blue
+        case 1: return .green
+        case 2: return .yellow
+        case 3: return .orange
+        default: return .red
+        }
     }
 
     @ViewBuilder
@@ -193,6 +224,16 @@ struct WorkoutWatchView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.orange)
                             }
+                        }
+                        if let zoneIdx = sessionManager.currentZoneIndex {
+                            Text("Zone \(zoneIdx + 1)")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(zoneColor(zoneIdx).opacity(0.25))
+                                .foregroundStyle(zoneColor(zoneIdx))
+                                .clipShape(Capsule())
                         }
                     }
 

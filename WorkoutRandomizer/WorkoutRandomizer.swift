@@ -1902,6 +1902,13 @@ struct WorkoutPlayerView: View {
                 }(),
                 peakHeartRate: peakHeartRate,
                 averageHeartRate: averageHeartRate,
+                hrZoneDurations: {
+                    #if os(iOS)
+                    return connectivityManager.completedZoneDurations
+                    #else
+                    return []
+                    #endif
+                }(),
                 onDismiss: {
                     showingRecap = false
                     dismiss()
@@ -2590,6 +2597,7 @@ struct WorkoutRecapView: View {
     let totalCalories: Double
     let peakHeartRate: Double
     let averageHeartRate: Double
+    var hrZoneDurations: [(name: String, seconds: TimeInterval)] = []
     let onDismiss: () -> Void
 
     private var totalTime: Int { totalExerciseTime + totalRestTime }
@@ -2622,6 +2630,45 @@ struct WorkoutRecapView: View {
                         if averageHeartRate > 0 {
                             RecapStatCard(title: "Avg HR",     value: "\(Int(averageHeartRate)) BPM", icon: "heart",      color: .pink)
                         }
+                    }
+
+                    if !hrZoneDurations.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Time in Zone", systemImage: "heart.text.square.fill")
+                                .font(.headline)
+                            ForEach(Array(hrZoneDurations.enumerated()), id: \.offset) { idx, entry in
+                                HStack(spacing: 10) {
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(zoneColor(idx))
+                                        .frame(width: 4, height: 20)
+                                    Text(entry.name)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    Text(formatted(Int(entry.seconds)))
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundStyle(.secondary)
+                                    // Proportion bar
+                                    let total = hrZoneDurations.reduce(0) { $0 + $1.seconds }
+                                    let fraction = total > 0 ? entry.seconds / total : 0
+                                    GeometryReader { geo in
+                                        ZStack(alignment: .leading) {
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(Color.gray.opacity(0.15))
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(zoneColor(idx).opacity(0.7))
+                                                .frame(width: geo.size.width * fraction)
+                                        }
+                                    }
+                                    .frame(width: 60, height: 6)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(.gray.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
 
                     if !completedExercises.isEmpty {
@@ -2668,6 +2715,16 @@ struct WorkoutRecapView: View {
 
     private func formatted(_ seconds: Int) -> String {
         String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private func zoneColor(_ index: Int) -> Color {
+        switch index {
+        case 0: return .blue
+        case 1: return .green
+        case 2: return .yellow
+        case 3: return .orange
+        default: return .red
+        }
     }
 }
 

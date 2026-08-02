@@ -17,6 +17,7 @@ class WorkoutSessionManager: NSObject, ObservableObject {
     @Published var heartRate: Double = 0
     @Published var activeCalories: Double = 0
     @Published var peakHeartRate: Double = 0
+    @Published var currentZoneIndex: Int? = nil
     
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
@@ -50,6 +51,7 @@ class WorkoutSessionManager: NSObject, ObservableObject {
         let typesToRead: Set<HKObjectType> = [
             HKQuantityType.quantityType(forIdentifier: .heartRate)!,
             HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!,
+            HKQuantityType.quantityType(forIdentifier: .cyclingPower)!,
             HKObjectType.workoutType()
         ]
         
@@ -98,7 +100,23 @@ class WorkoutSessionManager: NSObject, ObservableObject {
         
         let startDate = Date()
         session.startActivity(with: startDate)
-        
+
+        // Use the user's preferred HR zone config if one exists; otherwise install
+        // a standard 5-zone fallback so zone tracking is always active.
+        let hrType = HKQuantityType(.heartRate)
+        let existingConfig = try? await builder.zoneConfiguration(for: hrType)
+        if existingConfig == nil {
+            let bpm = HKUnit.count().unitDivided(by: .minute())
+            let boundaries: [HKQuantity] = [
+                HKQuantity(unit: bpm, doubleValue: 114),  // Z1/Z2 ~60% of 190 max
+                HKQuantity(unit: bpm, doubleValue: 133),  // Z2/Z3 ~70%
+                HKQuantity(unit: bpm, doubleValue: 152),  // Z3/Z4 ~80%
+                HKQuantity(unit: bpm, doubleValue: 171),  // Z4/Z5 ~90%
+            ]
+            let fallback = HKWorkoutZoneConfiguration(quantityType: hrType, zoneBoundaries: boundaries)
+            try? await builder.setCustomZoneConfiguration(fallback, for: hrType)
+        }
+
         do {
             try await builder.beginCollection(at: startDate)
         } catch {
@@ -141,12 +159,33 @@ class WorkoutSessionManager: NSObject, ObservableObject {
         session = nil
         builder = nil
         preparedConfiguration = nil
-        
+
         DispatchQueue.main.async {
             self.isWorkoutActive = false
             self.heartRate = 0
             self.activeCalories = 0
             self.peakHeartRate = 0
+            self.currentZoneIndex = nil
+        }
+    }
+
+    // Snapshots current zone durations from the live builder for use in the
+    // recap. Must be called before endWorkout() tears the builder down.
+    func captureCurrentHRZones() -> [(name: String, seconds: TimeInterval)] {
+        guard let group = builder?.zoneGroup(for: HKQuantityType(.heartRate)) else { return [] }
+        let bpm = HKUnit.count().unitDivided(by: .minute())
+        return group.zoneDurations.map { dur in
+            let zoneNum = dur.zone.index + 1
+            let minStr = dur.zone.minimum.map { "\(Int($0.doubleValue(for: bpm)))" }
+            let maxStr = dur.zone.maximum.map { "\(Int($0.doubleValue(for: bpm)))" }
+            let label: String
+            switch (minStr, maxStr) {
+            case (nil, let max?):    label = "Zone \(zoneNum) (<\(max) bpm)"
+            case (let min?, nil):    label = "Zone \(zoneNum) (>\(min) bpm)"
+            case (let min?, let max?): label = "Zone \(zoneNum) (\(min)–\(max) bpm)"
+            case (nil, nil):         label = "Zone \(zoneNum)"
+            }
+            return (name: label, seconds: dur.duration)
         }
     }
 }
@@ -213,6 +252,20 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
     
     func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {
         // Handle workout events if needed
+    }
+
+    // MARK: - Live zone tracking
+
+    func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didUpdateWorkoutZone zoneUpdate: HKLiveWorkoutBuilder.ZoneUpdate) {
+        let newIndex = zoneUpdate.newZoneDuration?.zone.index
+        DispatchQueue.main.async {
+            let previousIndex = self.currentZoneIndex
+            self.currentZoneIndex = newIndex
+            // Haptic tap on every zone transition so the user feels the change
+            if newIndex != previousIndex {
+                WKInterfaceDevice.current().play(.notification)
+            }
+        }
     }
     
     // MARK: - Send Health Metrics to iPhone

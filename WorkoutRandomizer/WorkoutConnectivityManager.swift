@@ -55,6 +55,9 @@ class WorkoutConnectivityManager: ObservableObject {
     @Published var heartRate: Double = 0
     @Published var activeCalories: Double = 0
     @Published var isWatchWorkoutActive = false
+    /// Time-in-zone data relayed from the Watch at workout completion. Populated
+    /// asynchronously after the recap sheet opens, so the view updates reactively.
+    @Published var completedZoneDurations: [(name: String, seconds: TimeInterval)] = []
 
     private let session: WCSession? = WCSession.isSupported() ? WCSession.default : nil
 
@@ -78,6 +81,7 @@ class WorkoutConnectivityManager: ObservableObject {
 
         // A new/ongoing session is sending state — any previous completion is history
         pendingCompletionPayload = nil
+        completedZoneDurations = []
 
         // Always mirror the latest state into the application context (timestamped).
         // This way, if the watch app wakes or relaunches mid-session it immediately
@@ -220,6 +224,12 @@ class WorkoutConnectivityManager: ObservableObject {
             self.isWatchWorkoutActive = metrics.isWorkoutActive
         }
     }
+
+    nonisolated func receiveZoneData(_ zones: [(name: String, seconds: TimeInterval)]) {
+        Task { @MainActor in
+            self.completedZoneDurations = zones
+        }
+    }
 }
 
 // MARK: - WCSessionDelegate (separate class to handle nonisolated callbacks)
@@ -278,6 +288,16 @@ private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
         case "requestStop":
             Task { @MainActor in
                 WorkoutConnectivityManager.shared.watchRequestedStop = true
+            }
+        case "zoneData":
+            if let data = message["payload"] as? Data,
+               let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                let zones = raw.compactMap { dict -> (name: String, seconds: TimeInterval)? in
+                    guard let name = dict["name"] as? String,
+                          let seconds = dict["seconds"] as? TimeInterval else { return nil }
+                    return (name: name, seconds: seconds)
+                }
+                WorkoutConnectivityManager.shared.receiveZoneData(zones)
             }
         default:
             break
