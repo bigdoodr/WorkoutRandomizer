@@ -114,8 +114,9 @@ class WorkoutSessionManager: NSObject, ObservableObject {
                     HKQuantity(unit: bpm, doubleValue: 152),  // Z3/Z4 ~80%
                     HKQuantity(unit: bpm, doubleValue: 171),  // Z4/Z5 ~90%
                 ]
-                let fallback = HKWorkoutZoneConfiguration(quantityType: hrType, zoneBoundaries: boundaries)
-                try? await builder.setCustomZoneConfiguration(fallback, for: hrType)
+                if let fallback = try? HKWorkoutZoneConfiguration(quantityType: hrType, zoneBoundaries: boundaries) {
+                    try? await builder.setCustomZoneConfiguration(fallback, for: hrType)
+                }
             }
         }
 
@@ -260,7 +261,7 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
     // MARK: - Live zone tracking
 
     @available(watchOS 27, *)
-    func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didUpdateWorkoutZone zoneUpdate: HKLiveWorkoutBuilder.ZoneUpdate) {
+    func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didUpdateWorkoutZone zoneUpdate: HKLiveWorkoutZoneUpdate) {
         let newIndex = zoneUpdate.newZoneDuration?.zone.index
         DispatchQueue.main.async {
             let previousIndex = self.currentZoneIndex
