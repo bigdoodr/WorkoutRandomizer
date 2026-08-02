@@ -18,9 +18,12 @@ class WorkoutSessionManager: NSObject, ObservableObject {
     @Published var activeCalories: Double = 0
     @Published var peakHeartRate: Double = 0
     @Published var currentZoneIndex: Int? = nil
-    
+
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
+    /// Sorted HR boundary values (bpm) between zones — used to classify live HR into a zone index.
+    /// Set when the zone config is resolved at workout start; empty when zone tracking isn't active.
+    private var zoneThresholds: [Double] = []
     /// Guards against two concurrent start requests (e.g. the watch Start button
     /// and the iPhone's startWatchApp racing each other).
     private var isStartingSession = false
@@ -103,20 +106,23 @@ class WorkoutSessionManager: NSObject, ObservableObject {
 
         // Use the user's preferred HR zone config if one exists; otherwise install
         // a standard 5-zone fallback so zone tracking is always active.
+        // Store the boundary values so the live HR can be classified into a zone index.
         if #available(watchOS 27, *) {
             let hrType = HKQuantityType(.heartRate)
+            let bpm = HKUnit.count().unitDivided(by: .minute())
             let existingConfig = try? await builder.zoneConfiguration(for: hrType)
-            if existingConfig == nil {
-                let bpm = HKUnit.count().unitDivided(by: .minute())
-                let boundaries: [HKQuantity] = [
-                    HKQuantity(unit: bpm, doubleValue: 114),  // Z1/Z2 ~60% of 190 max
-                    HKQuantity(unit: bpm, doubleValue: 133),  // Z2/Z3 ~70%
-                    HKQuantity(unit: bpm, doubleValue: 152),  // Z3/Z4 ~80%
-                    HKQuantity(unit: bpm, doubleValue: 171),  // Z4/Z5 ~90%
-                ]
-                if let fallback = try? HKWorkoutZoneConfiguration(quantityType: hrType, zoneBoundaries: boundaries) {
+            if let existingConfig {
+                // Extract the upper threshold of each zone (nil on the last zone, filtered out)
+                // to get the sorted list of boundaries between zones.
+                let thresholds = existingConfig.zones.compactMap { $0.maximum?.doubleValue(for: bpm) }
+                await MainActor.run { self.zoneThresholds = thresholds }
+            } else {
+                let fallbackBoundaries: [Double] = [114, 133, 152, 171]
+                let quantities = fallbackBoundaries.map { HKQuantity(unit: bpm, doubleValue: $0) }
+                if let fallback = try? HKWorkoutZoneConfiguration(quantityType: hrType, zoneBoundaries: quantities) {
                     try? await builder.setCustomZoneConfiguration(fallback, for: hrType)
                 }
+                await MainActor.run { self.zoneThresholds = fallbackBoundaries }
             }
         }
 
@@ -169,6 +175,7 @@ class WorkoutSessionManager: NSObject, ObservableObject {
             self.activeCalories = 0
             self.peakHeartRate = 0
             self.currentZoneIndex = nil
+            self.zoneThresholds = []
         }
     }
 
@@ -240,6 +247,13 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
                         if self.heartRate > self.peakHeartRate {
                             self.peakHeartRate = self.heartRate
                         }
+                        if !self.zoneThresholds.isEmpty, self.heartRate > 0 {
+                            let newZone = self.zoneThresholds.firstIndex(where: { self.heartRate < $0 }) ?? self.zoneThresholds.count
+                            if newZone != self.currentZoneIndex {
+                                self.currentZoneIndex = newZone
+                                WKInterfaceDevice.current().play(.notification)
+                            }
+                        }
                     case HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned):
                         let energyUnit = HKUnit.kilocalorie()
                         self.activeCalories = statistics.sumQuantity()?.doubleValue(for: energyUnit) ?? 0
@@ -258,21 +272,6 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
         // Handle workout events if needed
     }
 
-    // MARK: - Live zone tracking
-
-    @available(watchOS 27, *)
-    func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didUpdateWorkoutZone zoneUpdate: HKLiveWorkoutZoneUpdate) {
-        let newIndex = zoneUpdate.newZoneDuration?.zone.index
-        DispatchQueue.main.async {
-            let previousIndex = self.currentZoneIndex
-            self.currentZoneIndex = newIndex
-            // Haptic tap on every zone transition so the user feels the change
-            if newIndex != previousIndex {
-                WKInterfaceDevice.current().play(.notification)
-            }
-        }
-    }
-    
     // MARK: - Send Health Metrics to iPhone
     
     private func sendHealthMetricsToPhone() {
