@@ -100,6 +100,7 @@ struct Exercise {
     let videoPath: String?
     let equipment: [String]
     var singleSided: Bool = false
+    var isMovement: Bool = false
 }
 
 enum TimerStyle: String, CaseIterable, Identifiable {
@@ -1291,6 +1292,14 @@ struct WorkoutGeneratorView: View {
                 if selectedFocusAreas.contains(custom.focusArea) && allowedLevels.contains(custom.difficulty) && selectedEquipment.contains("None") {
                     pool.append(Exercise(name: custom.name, videoPath: nil, equipment: ["None"]))
                 }
+            }
+
+            // Expand single-sided exercises into Left/Right pairs so each side gets its own timed slot
+            pool = pool.flatMap { ex -> [Exercise] in
+                guard ex.singleSided else { return [ex] }
+                let left  = Exercise(name: "\(ex.name) (Left)",  videoPath: ex.videoPath, equipment: ex.equipment, isMovement: ex.isMovement)
+                let right = Exercise(name: "\(ex.name) (Right)", videoPath: ex.videoPath, equipment: ex.equipment, isMovement: ex.isMovement)
+                return [left, right]
             }
 
             guard !pool.isEmpty else {

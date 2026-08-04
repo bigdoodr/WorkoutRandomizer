@@ -296,10 +296,24 @@ struct StretchRoutineView: View {
 
     private func generateStretches() {
         var pool: [Exercise] = []
+        var seen = Set<String>()
+        let secondaryLookup = catalog.exercisesByAdditionalCategory
+
         for category in stretchCategories where selectedCategories.contains(category) {
+            // Primary: exercises stored under this category
             if let difficultyDict = catalog.exercises[category] {
                 for (_, exerciseList) in difficultyDict {
-                    pool.append(contentsOf: exerciseList)
+                    for ex in exerciseList where !seen.contains(ex.name) {
+                        pool.append(ex)
+                        seen.insert(ex.name)
+                    }
+                }
+            }
+            // Secondary: exercises from other categories that list this as an additional category
+            if let additional = secondaryLookup[category] {
+                for ex in additional where !seen.contains(ex.name) {
+                    pool.append(ex)
+                    seen.insert(ex.name)
                 }
             }
         }
@@ -359,14 +373,8 @@ struct StretchPlayerView: View {
         return CGFloat(timeRemaining) / CGFloat(max(1, total))
     }
 
-    // "Hold" for static stretches, "Move" for dynamic/circular ones
     private var actionLabel: String {
-        guard let name = currentStretch?.name else { return "Hold" }
-        let lower = name.lowercased()
-        let dynamicKeywords = ["circle", "rotation", "swing", "roll", "dynamic",
-                               "mobilit", "oscillat", "bounce", "pendulum", "windmill",
-                               "hydrant", "clamshell", "walk-out", "march"]
-        return dynamicKeywords.contains(where: { lower.contains($0) }) ? "Move" : "Hold"
+        currentStretch?.isMovement == true ? "Move" : "Hold"
     }
 
     private var sideLabel: String? {

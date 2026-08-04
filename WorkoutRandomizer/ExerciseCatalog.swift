@@ -12,6 +12,8 @@ struct CatalogExercise: Codable, Equatable {
     let videoPath: String?
     let equipment: [String]?
     let singleSided: Bool?
+    let isMovement: Bool?
+    let additionalCategories: [String]?
 }
 
 struct CatalogData: Codable, Equatable {
@@ -42,9 +44,26 @@ final class ExerciseCatalog {
     var exercises: [String: [String: [Exercise]]] {
         data.exercises.mapValues { difficultyDict in
             difficultyDict.mapValues { catalogExercises in
-                catalogExercises.map { Exercise(name: $0.name, videoPath: $0.videoPath, equipment: $0.equipment ?? ["None"], singleSided: $0.singleSided ?? false) }
+                catalogExercises.map { Exercise(name: $0.name, videoPath: $0.videoPath, equipment: $0.equipment ?? ["None"], singleSided: $0.singleSided ?? false, isMovement: $0.isMovement ?? false) }
             }
         }
+    }
+
+    /// Exercises keyed by secondary category (from additionalCategories), for stretch pool building.
+    var exercisesByAdditionalCategory: [String: [Exercise]] {
+        var result: [String: [Exercise]] = [:]
+        for (_, difficultyDict) in data.exercises {
+            for (_, catalogExercises) in difficultyDict {
+                for ce in catalogExercises {
+                    guard let additional = ce.additionalCategories else { continue }
+                    let ex = Exercise(name: ce.name, videoPath: ce.videoPath, equipment: ce.equipment ?? ["None"], singleSided: ce.singleSided ?? false, isMovement: ce.isMovement ?? false)
+                    for category in additional {
+                        result[category, default: []].append(ex)
+                    }
+                }
+            }
+        }
+        return result
     }
 
     /// Flat dictionary of exercise name -> video path, for VideoManager.
@@ -103,24 +122,24 @@ final class ExerciseCatalog {
     // MARK: - Metadata Backfill
 
     /// The remote catalog may lag behind the app bundle and omit newer per-exercise
-    /// metadata (e.g. `singleSided`). Fill in any missing values from the bundled
-    /// catalog, matched by exercise name, so features like "Both Sides" keep working
+    /// metadata. Fill in any missing values from the bundled catalog, matched by
+    /// exercise name, so features like "Both Sides" and "Move/Hold" keep working
     /// regardless of which catalog source is active.
     private static func backfillMetadata(_ incoming: CatalogData) -> CatalogData {
         let bundled = loadBundled()
 
-        // Build name -> singleSided lookup from the bundle
         var bundledSingleSided: [String: Bool] = [:]
+        var bundledIsMovement: [String: Bool] = [:]
+        var bundledAdditionalCategories: [String: [String]] = [:]
         for (_, difficultyDict) in bundled.exercises {
             for (_, exerciseList) in difficultyDict {
                 for exercise in exerciseList {
-                    if let flag = exercise.singleSided {
-                        bundledSingleSided[exercise.name] = flag
-                    }
+                    if let flag = exercise.singleSided { bundledSingleSided[exercise.name] = flag }
+                    if let flag = exercise.isMovement { bundledIsMovement[exercise.name] = flag }
+                    if let cats = exercise.additionalCategories { bundledAdditionalCategories[exercise.name] = cats }
                 }
             }
         }
-        guard !bundledSingleSided.isEmpty else { return incoming }
 
         let mergedExercises = incoming.exercises.mapValues { difficultyDict in
             difficultyDict.mapValues { exerciseList in
@@ -129,7 +148,9 @@ final class ExerciseCatalog {
                         name: exercise.name,
                         videoPath: exercise.videoPath,
                         equipment: exercise.equipment,
-                        singleSided: exercise.singleSided ?? bundledSingleSided[exercise.name]
+                        singleSided: exercise.singleSided ?? bundledSingleSided[exercise.name],
+                        isMovement: exercise.isMovement ?? bundledIsMovement[exercise.name],
+                        additionalCategories: exercise.additionalCategories ?? bundledAdditionalCategories[exercise.name]
                     )
                 }
             }

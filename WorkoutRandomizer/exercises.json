@@ -42,7 +42,7 @@
                 { "name": "Reverse Lunge to High Knee", "videoPath": "/resources/reverseLungeHighKneeAngle2.mp4", "equipment": ["None"] }
             ],
             "Medium": [
-                { "name": "Bulgarian Split Squats", "videoPath": "/resources/bulgsplitsquat.mp4", "equipment": ["Chair/Box/Bench"] }
+                { "name": "Bulgarian Split Squats", "videoPath": "/resources/bulgsplitsquat.mp4", "equipment": ["Chair/Box/Bench"], "singleSided": true }
             ]
         },
         "Shoulders": {
@@ -136,76 +136,76 @@
         },
         "Morning Stretches": {
             "Beginner": [
-                { "name": "Cat-Cow Stretch", "videoPath": "/resources/cat-cow.mp4", "equipment": ["None"] },
-                { "name": "World's Greatest Stretch", "videoPath": "/resources/spidermanLungesAngle2.mp4", "equipment": ["None"] },
+                { "name": "Cat-Cow Stretch", "videoPath": "/resources/cat-cow.mp4", "equipment": ["None"], "additionalCategories": ["Warm-Up: Full Body"] },
+                { "name": "World's Greatest Stretch", "videoPath": "/resources/spidermanLungesAngle2.mp4", "equipment": ["None"], "singleSided": true, "additionalCategories": ["Warm-Up: Full Body"] },
                 { "name": "Thread the Needle", "videoPath": "/resources/ThreadTheNeedle.mp4", "equipment": ["None"], "singleSided": true },
                 { "name": "Seated Forward Fold", "videoPath": "/resources/seatedForwardFold.mp4", "equipment": ["None"] },
-                { "name": "Hip Flexor Lunge Stretch", "videoPath": "/resources/hipFlexorLungeStretch.mp4", "equipment": ["None"], "singleSided": true },
+                { "name": "Hip Flexor Lunge Stretch", "videoPath": "/resources/hipFlexorLungeStretch.mp4", "equipment": ["None"], "singleSided": true, "additionalCategories": ["Warm-Up: Hips"] },
                 { "name": "Thoracic Spine Extension", "videoPath": "/resources/thoracicSpineExtension.mp4", "equipment": ["None"] },
-                { "name": "Neck Side Stretch", "videoPath": "/resources/neckSideStretch.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Cross-Body Shoulder Stretch", "videoPath": "/resources/crossBodyShoulderStretch.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Squat Fold", "videoPath": "/resources/SquatFold.mp4", "equipment": ["None"] },
-                { "name": "Side Bridge & Reach", "videoPath": "/resources/SideBridgeAndReach.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "QL Pull Through", "videoPath": "/resources/QLPullThrough.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Hip Switch & Lean", "videoPath": "/resources/HipSwitchAndLean.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "London Bridge", "videoPath": "/resources/LondonBridges.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Bridge and Reach Over", "videoPath": "/resources/BridgeAndReachOver.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "QL Slide", "videoPath": "/resources/QLSlide.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Squat and Reach", "videoPath": "/resources/SquatAndReach.mp4", "equipment": ["None"] },
-                { "name": "Kneeling Lunge and Torso Twist", "videoPath": "/resources/KneelingLungeAndTorsoTwist.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Hip Hinge and Torso Bend", "videoPath": "/resources/HipHingeAndTorsoBend.mp4", "equipment": ["None"] }
+                { "name": "Neck Side Stretch", "videoPath": "/resources/neckSideStretch.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Cross-Body Shoulder Stretch", "videoPath": "/resources/crossBodyShoulderStretch.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Squat Fold", "videoPath": "/resources/SquatFold.mp4", "equipment": ["None"], "isMovement": true, "additionalCategories": ["Warm-Up: Hips"] },
+                { "name": "Side Bridge & Reach", "videoPath": "/resources/SideBridgeAndReach.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "QL Pull Through", "videoPath": "/resources/QLPullThrough.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "Hip Switch & Lean", "videoPath": "/resources/HipSwitchAndLean.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "London Bridge", "videoPath": "/resources/LondonBridges.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "Bridge and Reach Over", "videoPath": "/resources/BridgeAndReachOver.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "QL Slide", "videoPath": "/resources/QLSlide.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "Squat and Reach", "videoPath": "/resources/SquatAndReach.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Kneeling Lunge and Torso Twist", "videoPath": "/resources/KneelingLungeAndTorsoTwist.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "Hip Hinge and Torso Bend", "videoPath": "/resources/HipHingeAndTorsoBend.mp4", "equipment": ["None"], "isMovement": true }
             ]
         },
         "Evening Recovery": {
             "Beginner": [
-                { "name": "Supine Spinal Twist", "videoPath": "/resources/SupineSpinalTwist.mp4", "equipment": ["None"], "singleSided": true },
+                { "name": "Supine Spinal Twist", "videoPath": "/resources/SupineSpinalTwist.mp4", "equipment": ["None"], "singleSided": true, "additionalCategories": ["Cool Down"] },
                 { "name": "Happy Baby", "videoPath": "/resources/HappyBaby.mp4", "equipment": ["None"] },
-                { "name": "Figure-4 Hip Stretch", "videoPath": "/resources/Figure4.mp4", "equipment": ["None"], "singleSided": true },
+                { "name": "Figure-4 Hip Stretch", "videoPath": "/resources/Figure4.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true, "additionalCategories": ["Cool Down", "Warm-Up: Hips"] },
                 { "name": "Lying Quad Stretch", "videoPath": "/resources/LyingQuadStretch.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Butterfly Stretch", "videoPath": "/resources/Butterfly.mp4", "equipment": ["None"] },
-                { "name": "Child's Pose", "videoPath": "/resources/ChildsPose.mp4", "equipment": ["None"] },
-                { "name": "Neck Rolls", "videoPath": "/resources/NeckRolls.mp4", "equipment": ["None"] },
-                { "name": "Standing Side Bend", "videoPath": "/resources/SideBends.mp4", "equipment": ["None"], "singleSided": true },
+                { "name": "Butterfly Stretch", "videoPath": "/resources/Butterfly.mp4", "equipment": ["None"], "additionalCategories": ["Warm-Up: Hips", "Cool Down"] },
+                { "name": "Child's Pose", "videoPath": "/resources/ChildsPose.mp4", "equipment": ["None"], "additionalCategories": ["Cool Down"] },
+                { "name": "Neck Rolls", "videoPath": "/resources/NeckRolls.mp4", "equipment": ["None"], "isMovement": true, "additionalCategories": ["Warm-Up: Full Body"] },
+                { "name": "Standing Side Bend", "videoPath": "/resources/SideBends.mp4", "equipment": ["None"], "singleSided": true, "additionalCategories": ["Morning Stretches"] },
                 { "name": "Calf & Hamstring Wall Stretch", "videoPath": "/resources/StandingCalfStretch.mp4", "equipment": ["None"], "singleSided": true },
                 { "name": "Raised Forearms Child's Pose", "videoPath": "/resources/RaisedForearmsChildsPose.mp4", "equipment": ["None"] },
-                { "name": "Modified Pigeon Pose", "videoPath": "/resources/ModifiedPigeonPose.mp4", "equipment": ["None"], "singleSided": true }
+                { "name": "Modified Pigeon Pose", "videoPath": "/resources/ModifiedPigeonPose.mp4", "equipment": ["None"], "singleSided": true, "additionalCategories": ["Cool Down", "Warm-Up: Hips"] }
             ]
         },
         "Cool Down": {
             "Beginner": [
-                { "name": "Standing Quad Stretch", "videoPath": "/resources/StandingQuadStretch.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Standing Hamstring Stretch", "videoPath": "/resources/StandingHamstringStretch.mp4", "equipment": ["None"], "singleSided": true },
+                { "name": "Standing Quad Stretch", "videoPath": "/resources/StandingQuadStretch.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Standing Hamstring Stretch", "videoPath": "/resources/StandingHamstringStretch.mp4", "equipment": ["None"], "isMovement": true },
                 { "name": "Standing Calf Stretch", "videoPath": "/resources/StandingCalfStretch.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Hip Flexor Stretch", "videoPath": "/resources/hipFlexorLungeStretch.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Doorway Chest Opener", "videoPath": "/resources/DoorwayCactus.mp4", "equipment": ["None"] },
-                { "name": "Overhead Tricep Stretch", "videoPath": "/resources/OverheadTricepStretch.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Wrist Flexor Stretch", "videoPath": "/resources/WristFlexor.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Deep Belly Breathing", "videoPath": "/resources/DeepBellyBreathing.mp4", "equipment": ["None"] },
-                { "name": "Forward Fold", "videoPath": "/resources/ForwardFold.mp4", "equipment": ["None"] }
+                { "name": "Hip Flexor Stretch", "videoPath": "/resources/hipFlexorLungeStretch.mp4", "equipment": ["None"], "singleSided": true, "additionalCategories": ["Warm-Up: Hips"] },
+                { "name": "Doorway Chest Opener", "videoPath": "/resources/DoorwayCactus.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Overhead Tricep Stretch", "videoPath": "/resources/OverheadTricepStretch.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Wrist Flexor Stretch", "videoPath": "/resources/WristFlexor.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Deep Belly Breathing", "videoPath": "/resources/DeepBellyBreathing.mp4", "equipment": ["None"], "isMovement": true, "additionalCategories": ["Evening Recovery"] },
+                { "name": "Forward Fold", "videoPath": "/resources/ForwardFold.mp4", "equipment": ["None"], "additionalCategories": ["Morning Stretches", "Warm-Up: Full Body", "Warm-Up: Hips"] }
             ]
         },
         "Warm-Up: Hips": {
             "Beginner": [
-                { "name": "Hip Circles", "videoPath": "/resources/HipCirclesAngle1.mp4", "equipment": ["None"] },
-                { "name": "Fire Hydrants", "videoPath": "/resources/FireHydrant.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Lateral Lunge Stretch", "videoPath": "/resources/LateralLunges.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Hip 90/90 Rotations", "videoPath": "/resources/Hip9090Rotations.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Pigeon Pose", "videoPath": "/resources/PigeonPose.mp4", "equipment": ["None"], "singleSided": true },
+                { "name": "Hip Circles", "videoPath": "/resources/HipCirclesAngle1.mp4", "equipment": ["None"], "isMovement": true, "additionalCategories": ["Warm-Up: Full Body"] },
+                { "name": "Fire Hydrants", "videoPath": "/resources/FireHydrant.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "Lateral Lunge Stretch", "videoPath": "/resources/LateralLunges.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Hip 90/90 Rotations", "videoPath": "/resources/Hip9090Rotations.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "Pigeon Pose", "videoPath": "/resources/PigeonPose.mp4", "equipment": ["None"], "singleSided": true, "additionalCategories": ["Cool Down", "Evening Recovery"] },
                 { "name": "Deep Squat Hold", "videoPath": "/resources/DeepSquatHold.mp4", "equipment": ["None"] },
-                { "name": "Clamshells", "videoPath": "/resources/Clamshells.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Standing Hip Swings", "videoPath": "/resources/StandingHipSwings.mp4", "equipment": ["None"], "singleSided": true }
+                { "name": "Clamshells", "videoPath": "/resources/Clamshells.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "Standing Hip Swings", "videoPath": "/resources/StandingHipSwings.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true }
             ]
         },
         "Warm-Up: Full Body": {
             "Beginner": [
-                { "name": "Arm Circles", "videoPath": "/resources/ArmCircles.mp4", "equipment": ["None"] },
-                { "name": "Leg Swings", "videoPath": "/resources/LegSwings.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Trunk Rotations", "videoPath": "/resources/TrunkRotations.mp4", "equipment": ["None"] },
-                { "name": "Inchworm Walk-Outs", "videoPath": "/resources/Inchworms.mp4", "equipment": ["None"] },
-                { "name": "Slow High Knees", "videoPath": "/resources/SlowHighKnees.mp4", "equipment": ["None"] },
-                { "name": "Ankle Circles", "videoPath": "/resources/AnkleCircles.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Wrist Circles", "videoPath": "/resources/WristCircles.mp4", "equipment": ["None"], "singleSided": true },
-                { "name": "Neck Rotations", "videoPath": "/resources/NeckRotations.mp4", "equipment": ["None"] }
+                { "name": "Arm Circles", "videoPath": "/resources/ArmCircles.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Leg Swings", "videoPath": "/resources/LegSwings.mp4", "equipment": ["None"], "singleSided": true, "isMovement": true },
+                { "name": "Trunk Rotations", "videoPath": "/resources/TrunkRotations.mp4", "equipment": ["None"], "isMovement": true, "additionalCategories": ["Morning Stretches"] },
+                { "name": "Inchworm Walk-Outs", "videoPath": "/resources/Inchworms.mp4", "equipment": ["None"], "isMovement": true, "additionalCategories": ["Morning Stretches"] },
+                { "name": "Slow High Knees", "videoPath": "/resources/SlowHighKnees.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Ankle Circles", "videoPath": "/resources/AnkleCircles.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Wrist Circles", "videoPath": "/resources/WristCircles.mp4", "equipment": ["None"], "isMovement": true },
+                { "name": "Neck Rotations", "videoPath": "/resources/NeckRotations.mp4", "equipment": ["None"], "isMovement": true }
             ]
         }
     }
