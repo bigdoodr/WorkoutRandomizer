@@ -10,6 +10,10 @@ struct WorkoutWatchView: View {
     @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
     @StateObject private var sessionManager = WorkoutSessionManager.shared
     @State private var showEndWorkoutConfirmation = false
+    // Local countdown that fills in when phone timer updates are delayed/dropped
+    @State private var displayTime: Int = 0
+    @State private var lastPhoneUpdateAt: Date = .distantPast
+    @State private var localTicker: Timer?
 
     var workoutState: WorkoutState? {
         connectivityManager.workoutState
@@ -49,6 +53,29 @@ struct WorkoutWatchView: View {
         } message: {
             Text("A workout is running on your iPhone. Would you like to track it with Apple Health?")
         }
+        .onAppear {
+            displayTime = workoutState?.timeRemaining ?? 0
+            refreshLocalTicker()
+        }
+        .onDisappear {
+            localTicker?.invalidate()
+            localTicker = nil
+        }
+        // Phone sent a timer tick — accept it as ground truth and record when it arrived
+        .onChange(of: workoutState?.timeRemaining) { _, newTime in
+            guard let newTime else { return }
+            displayTime = newTime
+            lastPhoneUpdateAt = Date()
+        }
+        // New exercise or exercise index change — reset display time
+        .onChange(of: workoutState?.currentIndex) { _, _ in
+            displayTime = workoutState?.timeRemaining ?? 0
+            lastPhoneUpdateAt = Date()
+            refreshLocalTicker()
+        }
+        // Play/pause — start or stop the local ticker
+        .onChange(of: workoutState?.isPlaying) { _, _ in refreshLocalTicker() }
+        .onChange(of: workoutState?.isPaused)  { _, _ in refreshLocalTicker() }
     }
 
     @ViewBuilder
@@ -150,6 +177,21 @@ struct WorkoutWatchView: View {
         }
     }
 
+    // Starts (or restarts) a 1-second fallback ticker. The ticker only decrements
+    // displayTime when the phone hasn't sent an update in the last 1.5 s — i.e.
+    // it only fires when the Bluetooth link is momentarily unavailable.
+    private func refreshLocalTicker() {
+        localTicker?.invalidate()
+        guard let state = workoutState, state.isPlaying, !state.isPaused else {
+            localTicker = nil
+            return
+        }
+        localTicker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            guard Date().timeIntervalSince(lastPhoneUpdateAt) > 1.5 else { return }
+            displayTime = max(0, displayTime - 1)
+        }
+    }
+
     @ViewBuilder
     private var activeWorkoutView: some View {
         ScrollView {
@@ -162,7 +204,7 @@ struct WorkoutWatchView: View {
                             .fontWeight(.semibold)
                             .foregroundStyle(.orange)
 
-                        Text("\(state.timeRemaining)")
+                        Text("\(displayTime)")
                             .font(.system(size: 56, weight: .bold, design: .monospaced))
                             .foregroundStyle(.orange)
 
@@ -199,9 +241,9 @@ struct WorkoutWatchView: View {
                                 .clipShape(Capsule())
                         }
 
-                        Text("\(state.timeRemaining)")
+                        Text("\(displayTime)")
                             .font(.system(size: 56, weight: .bold, design: .monospaced))
-                            .foregroundStyle(state.timeRemaining <= 3 && state.timeRemaining > 0 ? .red : .green)
+                            .foregroundStyle(displayTime <= 3 && displayTime > 0 ? .red : .green)
                     }
 
                     // Progress Indicator

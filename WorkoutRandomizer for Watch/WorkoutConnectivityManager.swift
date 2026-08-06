@@ -177,12 +177,12 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
     }
 
     private func sendZoneDataToPhone(_ zones: [(name: String, seconds: TimeInterval)]) {
-        guard let session = session, session.isReachable, !zones.isEmpty else { return }
+        guard let session = session, !zones.isEmpty else { return }
+        // transferUserInfo queues reliably and delivers even when the phone isn't
+        // currently reachable — unlike sendMessage which silently drops the data
+        // if the phone isn't in the foreground at the moment the workout ends.
         let payload = zones.map { ["name": $0.name, "seconds": $0.seconds] as [String: Any] }
-        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
-        session.sendMessage(["type": "zoneData", "payload": data], replyHandler: nil) { error in
-            print("Failed to send zone data to iPhone: \(error.localizedDescription)")
-        }
+        session.transferUserInfo(["type": "zoneData", "zones": payload])
     }
 
     // MARK: Receive live messages

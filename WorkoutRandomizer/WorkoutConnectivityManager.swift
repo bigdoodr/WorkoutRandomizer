@@ -58,6 +58,10 @@ class WorkoutConnectivityManager: ObservableObject {
     /// Time-in-zone data relayed from the Watch at workout completion. Populated
     /// asynchronously after the recap sheet opens, so the view updates reactively.
     @Published var completedZoneDurations: [(name: String, seconds: TimeInterval)] = []
+    /// HR zone boundary values (BPM) sent by the watch at workout start. When
+    /// non-empty the live display uses these instead of the 220-age formula so
+    /// both devices classify zones identically.
+    @Published var watchZoneThresholds: [Double] = []
 
     private let session: WCSession? = WCSession.isSupported() ? WCSession.default : nil
 
@@ -82,6 +86,7 @@ class WorkoutConnectivityManager: ObservableObject {
         // A new/ongoing session is sending state — any previous completion is history
         pendingCompletionPayload = nil
         completedZoneDurations = []
+        watchZoneThresholds = []
 
         // Always mirror the latest state into the application context (timestamped).
         // This way, if the watch app wakes or relaunches mid-session it immediately
@@ -230,6 +235,12 @@ class WorkoutConnectivityManager: ObservableObject {
             self.completedZoneDurations = zones
         }
     }
+
+    nonisolated func receiveZoneThresholds(_ thresholds: [Double]) {
+        Task { @MainActor in
+            self.watchZoneThresholds = thresholds
+        }
+    }
 }
 
 // MARK: - WCSessionDelegate (separate class to handle nonisolated callbacks)
@@ -298,6 +309,27 @@ private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
                     return (name: name, seconds: seconds)
                 }
                 WorkoutConnectivityManager.shared.receiveZoneData(zones)
+            }
+        default:
+            break
+        }
+    }
+
+    // Handles data delivered via transferUserInfo (reliable, queued delivery)
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String : Any] = [:]) {
+        guard let type = userInfo["type"] as? String else { return }
+        switch type {
+        case "zoneData":
+            guard let raw = userInfo["zones"] as? [[String: Any]] else { return }
+            let zones = raw.compactMap { dict -> (name: String, seconds: TimeInterval)? in
+                guard let name = dict["name"] as? String,
+                      let seconds = dict["seconds"] as? TimeInterval else { return nil }
+                return (name: name, seconds: seconds)
+            }
+            WorkoutConnectivityManager.shared.receiveZoneData(zones)
+        case "zoneThresholds":
+            if let thresholds = userInfo["thresholds"] as? [Double] {
+                WorkoutConnectivityManager.shared.receiveZoneThresholds(thresholds)
             }
         default:
             break

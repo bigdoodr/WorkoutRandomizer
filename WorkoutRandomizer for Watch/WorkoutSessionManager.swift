@@ -126,6 +126,14 @@ class WorkoutSessionManager: NSObject, ObservableObject {
             }
         }
 
+        // Relay resolved thresholds to iPhone so its live zone display stays in sync
+        // with the watch's classification (they may differ if HealthKit holds a custom
+        // zone config with a different effective max HR than the 220-age formula).
+        let resolvedThresholds = zoneThresholds
+        if !resolvedThresholds.isEmpty && WCSession.isSupported() {
+            WCSession.default.transferUserInfo(["type": "zoneThresholds", "thresholds": resolvedThresholds])
+        }
+
         do {
             try await builder.beginCollection(at: startDate)
         } catch {

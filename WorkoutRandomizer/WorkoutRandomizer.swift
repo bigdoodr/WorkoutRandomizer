@@ -1532,7 +1532,7 @@ struct WorkoutPlayerView: View {
     @State private var heartRateSamples: [Double] = []
     @State private var showingRecap = false
     // HR intention banner
-    @State private var intentionBannerText: String? = nil
+    @State private var intentionBanner: IntentionBannerPayload? = nil
     @State private var intentionBannerTask: Task<Void, Never>? = nil
     @State private var lastBannerExerciseTime: Int = -1
     @State private var userMaxHeartRate: Double = 185 // default: age 35
@@ -1556,8 +1556,14 @@ struct WorkoutPlayerView: View {
     }
     
     var videoURL: URL? {
-        guard let name = currentExercise?.name else { return nil }
-        return videoManager.url(for: name)
+        guard let exercise = currentExercise else { return nil }
+        // Prefer the exercise's explicit videoPath (works for left/right expanded variants
+        // whose names don't appear as keys in the catalog). Fall back to name lookup only
+        // when videoPath is nil (e.g. custom exercises added by the user).
+        if let path = exercise.videoPath {
+            return videoManager.playableURL(forRelativePath: path)
+        }
+        return videoManager.url(for: exercise.name)
     }
     
     var nextUpText: String {
@@ -1606,29 +1612,31 @@ struct WorkoutPlayerView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
-                let height = proxy.size.height
-                VStack(spacing: 0) {
+                let isLandscape = proxy.size.width > proxy.size.height
+                #if os(iOS)
+                let videoMaxH: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 240 : (isLandscape ? 110 : 180)
+                #else
+                let videoMaxH: CGFloat = 220
+                #endif
+                let videoHeight = min(proxy.size.height * 0.35, videoMaxH)
+                ScrollView {
                     VStack(spacing: 16) {
                         // Video
                         if VideoMode(rawValue: videoManager.videoMode) != Optional.none {
                             if let player = avPlayer {
                                 #if os(macOS)
                                 AVPlayerLayerView(player: player)
-                                    .frame(height: min(height * 0.35, 220))
+                                    .frame(height: videoHeight)
                                     .cornerRadius(10)
                                 #else
                                 VideoPlayer(player: player)
-                                    .frame(height: min(height * 0.35, UIDevice.current.userInterfaceIdiom == .pad ? 240 : 180))
+                                    .frame(height: videoHeight)
                                     .cornerRadius(10)
                                 #endif
                             } else if videoURL != nil {
                                 Rectangle()
                                     .fill(Color.black.opacity(0.1))
-                                #if os(iOS)
-                                    .frame(height: min(height * 0.35, UIDevice.current.userInterfaceIdiom == .pad ? 240 : 180))
-                                #else
-                                    .frame(height: min(height * 0.35, 220))
-                                #endif
+                                    .frame(height: videoHeight)
                                     .cornerRadius(10)
                             } else if !isRest {
                                 // Exercise has no video — show a subtle placeholder
@@ -1644,11 +1652,7 @@ struct WorkoutPlayerView: View {
                                             .foregroundStyle(.secondary)
                                     }
                                 }
-                                #if os(iOS)
-                                .frame(height: min(height * 0.35, UIDevice.current.userInterfaceIdiom == .pad ? 240 : 180))
-                                #else
-                                .frame(height: min(height * 0.35, 220))
-                                #endif
+                                .frame(height: videoHeight)
                             }
                         }
 
@@ -1694,7 +1698,8 @@ struct WorkoutPlayerView: View {
                                 heartRate: connectivityManager.heartRate,
                                 hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
                                 intention: intention,
-                                maxHeartRate: userMaxHeartRate
+                                maxHeartRate: userMaxHeartRate,
+                                zoneThresholds: connectivityManager.watchZoneThresholds
                             )
                             .padding(.top, 4)
                             #else
@@ -1733,9 +1738,8 @@ struct WorkoutPlayerView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        Spacer(minLength: 0)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .frame(maxWidth: .infinity, alignment: .top)
                     .padding()
                 }
                 .safeAreaInset(edge: .bottom) {
@@ -1830,14 +1834,17 @@ struct WorkoutPlayerView: View {
 #endif
             }
             .overlay(alignment: .top) {
-                if let msg = intentionBannerText {
-                    IntentionBannerView(message: msg, color: intention.bannerColor)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                if let banner = intentionBanner {
+                    IntentionBannerView(payload: banner, intentionColor: intention.bannerColor)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .top).combined(with: .scale(scale: 0.7, anchor: .top)).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        ))
                         .padding(.top, 8)
                         .padding(.horizontal, 16)
                 }
             }
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: intentionBannerText)
+            .animation(.spring(response: 0.45, dampingFraction: 0.58), value: intentionBanner)
 #if os(macOS)
             .frame(minWidth: 800, minHeight: 600)
 #endif
@@ -1918,6 +1925,7 @@ struct WorkoutPlayerView: View {
                     return []
                     #endif
                 }(),
+                intention: intention,
                 onDismiss: {
                     showingRecap = false
                     dismiss()
@@ -2373,6 +2381,13 @@ struct WorkoutPlayerView: View {
     #endif
 
     private func hrZoneName(bpm: Double, maxHR: Double) -> String {
+        #if os(iOS)
+        let thresholds = connectivityManager.watchZoneThresholds
+        if !thresholds.isEmpty {
+            let idx = thresholds.firstIndex(where: { bpm < $0 }) ?? thresholds.count
+            return "Zone \(idx + 1)"
+        }
+        #endif
         let pct = bpm / maxHR
         switch pct {
         case ..<0.60:       return "Zone 1"
@@ -2383,55 +2398,100 @@ struct WorkoutPlayerView: View {
         }
     }
 
-    private func intentionMismatchMessage(hr: Double) -> String? {
+    private func intentionBannerPayload(hr: Double) -> IntentionBannerPayload? {
         let zone = hrZoneName(bpm: hr, maxHR: userMaxHeartRate)
         switch (intention, zone) {
-        case (.fatBurn, "Zone 4"), (.fatBurn, "Zone 5"):
-            return "It's okay to ease up — you're burning more carbs than fat right now"
+
+        // Fat Burn
         case (.fatBurn, "Zone 1"):
-            return "Try picking up the pace to reach your fat-burn zone"
+            return IntentionBannerPayload(message: "Pick up the pace — your fat-burn zone is just ahead!", icon: "hare.fill", tone: .nudgeUp)
+        case (.fatBurn, "Zone 2"), (.fatBurn, "Zone 3"):
+            return IntentionBannerPayload(message: "Sweet spot — you're torching fat right now! 🔥", icon: "flame.fill", tone: .positive)
+        case (.fatBurn, "Zone 4"), (.fatBurn, "Zone 5"):
+            return IntentionBannerPayload(message: "Ease up a little — you're burning carbs, not fat.", icon: "tortoise.fill", tone: .nudgeDown)
+
+        // Cardio Endurance
         case (.cardioEndurance, "Zone 1"):
-            return "Push a little harder to build your aerobic base"
+            return IntentionBannerPayload(message: "Push harder to build your aerobic base!", icon: "arrow.up.circle.fill", tone: .nudgeUp)
         case (.cardioEndurance, "Zone 2") where hr < 110:
-            return "A bit more effort will grow your aerobic capacity"
-        case (.strengthPower, "Zone 5"):
-            return "Great power output — give yourself a solid rest before the next set"
+            return IntentionBannerPayload(message: "A bit more effort will grow your aerobic capacity!", icon: "arrow.up.circle.fill", tone: .nudgeUp)
+        case (.cardioEndurance, "Zone 3"), (.cardioEndurance, "Zone 4"):
+            return IntentionBannerPayload(message: "Aerobic engine firing — building real endurance! 💪", icon: "heart.fill", tone: .positive)
+        case (.cardioEndurance, "Zone 5"):
+            return IntentionBannerPayload(message: "Incredible effort! Your cardiovascular fitness is skyrocketing!", icon: "star.fill", tone: .positive)
+
+        // Strength / Power
+        case (.strengthPower, "Zone 1"), (.strengthPower, "Zone 2"):
+            return IntentionBannerPayload(message: "Power lives in Zone 4+ — channel that energy!", icon: "arrow.up.circle.fill", tone: .nudgeUp)
+        case (.strengthPower, "Zone 3"):
+            return IntentionBannerPayload(message: "Getting there — push for that extra burst!", icon: "arrow.up.circle.fill", tone: .nudgeUp)
+        case (.strengthPower, "Zone 4"), (.strengthPower, "Zone 5"):
+            return IntentionBannerPayload(message: "POWER MODE — you're absolutely CRUSHING it! 💪", icon: "bolt.fill", tone: .positive)
+
+        // General Fitness
+        case (.generalFitness, "Zone 1"):
+            return IntentionBannerPayload(message: "A little more effort will give your fitness a real boost!", icon: "arrow.up.circle.fill", tone: .nudgeUp)
+        case (.generalFitness, "Zone 2"), (.generalFitness, "Zone 3"):
+            return IntentionBannerPayload(message: "Perfect pace — you're right where you want to be!", icon: "checkmark.circle.fill", tone: .positive)
+        case (.generalFitness, "Zone 4"), (.generalFitness, "Zone 5"):
+            return IntentionBannerPayload(message: "You're working hard — keep it up! 🔥", icon: "flame.fill", tone: .positive)
+
         default:
             return nil
         }
     }
 
     private func showIntentionBannerIfNeeded(hr: Double) {
-        guard let message = intentionMismatchMessage(hr: hr) else { return }
+        guard let payload = intentionBannerPayload(hr: hr) else { return }
         intentionBannerTask?.cancel()
-        withAnimation { intentionBannerText = message }
+        withAnimation { intentionBanner = payload }
         intentionBannerTask = Task {
             try? await Task.sleep(nanoseconds: 6_000_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation { intentionBannerText = nil }
+            withAnimation { intentionBanner = nil }
         }
     }
 }
 
-private struct IntentionBannerView: View {
+private struct IntentionBannerPayload: Equatable {
+    enum Tone: Equatable { case positive, nudgeUp, nudgeDown }
     let message: String
-    let color: Color
+    let icon: String
+    let tone: Tone
+}
+
+private struct IntentionBannerView: View {
+    let payload: IntentionBannerPayload
+    let intentionColor: Color
+
+    @State private var appeared = false
+
+    private var displayColor: Color {
+        switch payload.tone {
+        case .positive: return intentionColor
+        case .nudgeUp:  return .orange
+        case .nudgeDown: return .teal
+        }
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "heart.fill")
-                .foregroundStyle(color)
-            Text(message)
+        HStack(spacing: 12) {
+            Image(systemName: payload.icon)
+                .font(.title3)
+                .foregroundStyle(.white)
+                .symbolEffect(.bounce, value: appeared)
+            Text(payload.message)
                 .font(.subheadline)
-                .fontWeight(.medium)
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(Capsule().fill(displayColor.gradient))
+        .shadow(color: displayColor.opacity(0.45), radius: 10, y: 4)
+        .onAppear { appeared = true }
     }
 }
 // MARK: - Array Unique Extension
@@ -2449,32 +2509,45 @@ struct WorkoutLiveStatsView: View {
     let hasWatchData: Bool
     let intention: WorkoutIntention
     let maxHeartRate: Double
+    var zoneThresholds: [Double] = []
 
     @State private var showingZonePopover = false
 
     private var hrInfo: (zone: String, color: Color, nutrient: String) {
-        let pct = heartRate / maxHeartRate
-        switch pct {
-        case ..<0.60:       return ("Zone 1", .green, "Active Recovery")
-        case 0.60..<0.70:   return ("Zone 2", .yellow, "Fat Burn")
-        case 0.70..<0.80:   return ("Zone 3", .orange, "Mixed")
-        case 0.80..<0.90:   return ("Zone 4", .red, "Carb Burn")
-        default:             return ("Zone 5", .purple, "Peak Effort")
+        let idx: Int
+        if !zoneThresholds.isEmpty {
+            idx = zoneThresholds.firstIndex(where: { heartRate < $0 }) ?? zoneThresholds.count
+        } else {
+            let pct = heartRate / maxHeartRate
+            switch pct {
+            case ..<0.60:     idx = 0
+            case 0.60..<0.70: idx = 1
+            case 0.70..<0.80: idx = 2
+            case 0.80..<0.90: idx = 3
+            default:          idx = 4
+            }
+        }
+        switch idx {
+        case 0: return ("Zone 1", .green, "Active Recovery")
+        case 1: return ("Zone 2", .yellow, "Fat Burn")
+        case 2: return ("Zone 3", .orange, "Mixed")
+        case 3: return ("Zone 4", .red, "Carb Burn")
+        default: return ("Zone 5", .purple, "Peak Effort")
         }
     }
 
-    private var zoneDetails: [String: (bpmRange: String, description: String)] {
-        let z1 = Int(maxHeartRate * 0.60)
-        let z2 = Int(maxHeartRate * 0.70)
-        let z3 = Int(maxHeartRate * 0.80)
-        let z4 = Int(maxHeartRate * 0.90)
-        return [
-            "Zone 1": (bpmRange: "< \(z1) BPM",        description: "Very light. Active recovery."),
-            "Zone 2": (bpmRange: "\(z1)–\(z2) BPM",   description: "Light aerobic. Optimal fat oxidation."),
-            "Zone 3": (bpmRange: "\(z2)–\(z3) BPM",   description: "Moderate aerobic. Mixed carb/fat fuel."),
-            "Zone 4": (bpmRange: "\(z3)–\(z4) BPM",   description: "High intensity. Lactate threshold zone."),
-            "Zone 5": (bpmRange: "\(z4)+ BPM",         description: "Maximum effort. Anaerobic capacity."),
-        ]
+    private func zoneBPMRange(index: Int) -> String {
+        let t = zoneThresholds.isEmpty
+            ? [maxHeartRate * 0.60, maxHeartRate * 0.70, maxHeartRate * 0.80, maxHeartRate * 0.90]
+            : zoneThresholds
+        let lower = index > 0 && index - 1 < t.count ? Int(t[index - 1]) : nil
+        let upper = index < t.count ? Int(t[index]) : nil
+        switch (lower, upper) {
+        case (nil, let u?): return "< \(u) BPM"
+        case (let l?, nil): return "\(l)+ BPM"
+        case (let l?, let u?): return "\(l)–\(u) BPM"
+        default: return "—"
+        }
     }
 
     var body: some View {
@@ -2515,7 +2588,7 @@ struct WorkoutLiveStatsView: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showingZonePopover) {
-                    HRZonePopoverView(zone: hrInfo.zone, color: hrInfo.color, intention: intention, maxHeartRate: maxHeartRate)
+                    HRZonePopoverView(zone: hrInfo.zone, color: hrInfo.color, intention: intention, maxHeartRate: maxHeartRate, zoneThresholds: zoneThresholds)
                 }
 
                 Divider().frame(height: 40)
@@ -2547,18 +2620,29 @@ private struct HRZonePopoverView: View {
     let color: Color
     let intention: WorkoutIntention
     let maxHeartRate: Double
+    var zoneThresholds: [Double] = []
+
+    private func zoneBPMRange(index: Int) -> String {
+        let t = zoneThresholds.isEmpty
+            ? [maxHeartRate * 0.60, maxHeartRate * 0.70, maxHeartRate * 0.80, maxHeartRate * 0.90]
+            : zoneThresholds
+        let lower = index > 0 && index - 1 < t.count ? Int(t[index - 1]) : nil
+        let upper = index < t.count ? Int(t[index]) : nil
+        switch (lower, upper) {
+        case (nil, let u?): return "< \(u) BPM"
+        case (let l?, nil): return "\(l)+ BPM"
+        case (let l?, let u?): return "\(l)–\(u) BPM"
+        default: return "—"
+        }
+    }
 
     private var details: [String: (bpmRange: String, description: String)] {
-        let z1 = Int(maxHeartRate * 0.60)
-        let z2 = Int(maxHeartRate * 0.70)
-        let z3 = Int(maxHeartRate * 0.80)
-        let z4 = Int(maxHeartRate * 0.90)
         return [
-            "Zone 1": (bpmRange: "< \(z1) BPM",        description: "Very light. Active recovery."),
-            "Zone 2": (bpmRange: "\(z1)–\(z2) BPM",   description: "Light aerobic. Optimal fat oxidation."),
-            "Zone 3": (bpmRange: "\(z2)–\(z3) BPM",   description: "Moderate aerobic. Mixed carb/fat fuel."),
-            "Zone 4": (bpmRange: "\(z3)–\(z4) BPM",   description: "High intensity. Lactate threshold zone."),
-            "Zone 5": (bpmRange: "\(z4)+ BPM",         description: "Maximum effort. Anaerobic capacity."),
+            "Zone 1": (bpmRange: zoneBPMRange(index: 0), description: "Very light. Active recovery."),
+            "Zone 2": (bpmRange: zoneBPMRange(index: 1), description: "Light aerobic. Optimal fat oxidation."),
+            "Zone 3": (bpmRange: zoneBPMRange(index: 2), description: "Moderate aerobic. Mixed carb/fat fuel."),
+            "Zone 4": (bpmRange: zoneBPMRange(index: 3), description: "High intensity. Lactate threshold zone."),
+            "Zone 5": (bpmRange: zoneBPMRange(index: 4), description: "Maximum effort. Anaerobic capacity."),
         ]
     }
 
@@ -2607,9 +2691,54 @@ struct WorkoutRecapView: View {
     let peakHeartRate: Double
     let averageHeartRate: Double
     var hrZoneDurations: [(name: String, seconds: TimeInterval)] = []
+    var intention: WorkoutIntention = .generalFitness
     let onDismiss: () -> Void
 
     private var totalTime: Int { totalExerciseTime + totalRestTime }
+
+    private var targetZoneIndices: [Int] {
+        switch intention {
+        case .generalFitness:  return [1, 2]
+        case .fatBurn:         return [1, 2]
+        case .cardioEndurance: return [2, 3]
+        case .strengthPower:   return [3, 4]
+        }
+    }
+
+    private var targetZoneLabel: String {
+        switch intention {
+        case .generalFitness:  return "Zones 2–3"
+        case .fatBurn:         return "Zones 2–3"
+        case .cardioEndurance: return "Zones 3–4"
+        case .strengthPower:   return "Zones 4–5"
+        }
+    }
+
+    private var alignmentFraction: Double {
+        let total = hrZoneDurations.reduce(0.0) { $0 + $1.seconds }
+        guard total > 0 else { return 0 }
+        let targetTime = targetZoneIndices.compactMap { idx in
+            idx < hrZoneDurations.count ? hrZoneDurations[idx].seconds : nil
+        }.reduce(0.0, +)
+        return targetTime / total
+    }
+
+    private var alignmentLabel: String {
+        switch alignmentFraction {
+        case 0.8...: return "Excellent"
+        case 0.6..<0.8: return "Good"
+        case 0.4..<0.6: return "Moderate"
+        default: return "Low"
+        }
+    }
+
+    private var alignmentColor: Color {
+        switch alignmentFraction {
+        case 0.6...: return .green
+        case 0.4..<0.6: return .yellow
+        default: return .orange
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -2638,6 +2767,9 @@ struct WorkoutRecapView: View {
                         }
                         if averageHeartRate > 0 {
                             RecapStatCard(title: "Avg HR",     value: "\(Int(averageHeartRate)) BPM", icon: "heart",      color: .pink)
+                        }
+                        if !hrZoneDurations.isEmpty {
+                            RecapStatCard(title: intention.rawValue, value: "\(alignmentLabel)", icon: intention.icon, color: alignmentColor)
                         }
                     }
 
