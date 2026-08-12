@@ -22,19 +22,19 @@
             ],
             "Medium": [
                 { "name": "Alternating Split Squats", "videoPath": "/resources/splitSquats.mp4", "equipment": ["None"] },
-                { "name": "Frog Hops", "videoPath": "/resources/frogHops.mp4", "equipment": ["None"] },
-                { "name": "Squat Jumps", "videoPath": "/resources/squatJumps.mp4", "equipment": ["None"] }
+                { "name": "Frog Hops", "videoPath": "/resources/frogHops.mp4", "equipment": ["None"], "additionalCategories": ["Cardio"] },
+                { "name": "Squat Jumps", "videoPath": "/resources/squatJumps.mp4", "equipment": ["None"], "additionalCategories": ["Cardio"] }
             ],
             "Hard": [
-                { "name": "180° Squat Jumps", "videoPath": "/resources/180JumpSquats.mp4", "equipment": ["None"] },
-                { "name": "Ninja Tuck Jumps", "videoPath": "/resources/ninjaTuckJumps.mp4", "equipment": ["None"] },
-                { "name": "Prisoner Squat Jumps", "videoPath": "/resources/prisonerSquatJumps.mp4", "equipment": ["None"] },
-                { "name": "3-Point Alternating Hops", "videoPath": "/resources/3pointAltHops.mp4", "equipment": ["None"] },
-                { "name": "Box Jumps", "videoPath": "/resources/boxjumps.mp4", "equipment": ["Chair/Box/Bench"] }
+                { "name": "180° Squat Jumps", "videoPath": "/resources/180JumpSquats.mp4", "equipment": ["None"], "additionalCategories": ["Cardio"] },
+                { "name": "Ninja Tuck Jumps", "videoPath": "/resources/ninjaTuckJumps.mp4", "equipment": ["None"], "additionalCategories": ["Cardio"] },
+                { "name": "Prisoner Squat Jumps", "videoPath": "/resources/prisonerSquatJumps.mp4", "equipment": ["None"], "additionalCategories": ["Cardio"] },
+                { "name": "3-Point Alternating Hops", "videoPath": "/resources/3pointAltHops.mp4", "equipment": ["None"], "additionalCategories": ["Cardio"] },
+                { "name": "Box Jumps", "videoPath": "/resources/boxjumps.mp4", "equipment": ["Chair/Box/Bench"], "additionalCategories": ["Cardio"] }
             ],
             "Expert/Advanced": [
-                { "name": "Prisoner Ninja Tuck Jumps", "videoPath": "/resources/prisonerNinjaTuckJumps.mp4", "equipment": ["None"] },
-                { "name": "Triple Skyfalls", "videoPath": "/resources/3xskyfalls.mp4", "equipment": ["None"] }
+                { "name": "Prisoner Ninja Tuck Jumps", "videoPath": "/resources/prisonerNinjaTuckJumps.mp4", "equipment": ["None"], "additionalCategories": ["Cardio"] },
+                { "name": "Triple Skyfalls", "videoPath": "/resources/3xskyfalls.mp4", "equipment": ["None"], "additionalCategories": ["Cardio"] }
             ]
         },
         "Legs: Strength": {
@@ -92,7 +92,7 @@
             "Hard": [
                 { "name": "Bicycle Crunches", "videoPath": "/resources/bicycleCrunchesAngle2.mp4", "equipment": ["None"] },
                 { "name": "Jackknives - Level 2", "videoPath": "/resources/jackknivesLevel2.mp4", "equipment": ["None"] },
-                { "name": "Mountain Climbers", "videoPath": "/resources/mountainClimbers.mp4", "equipment": ["None"] },
+                { "name": "Mountain Climbers", "videoPath": "/resources/mountainClimbers.mp4", "equipment": ["None"], "additionalCategories": ["Cardio"] },
                 { "name": "Plank Elbow to Knee Taps", "videoPath": "/resources/plankElbowToKneeTaps.mp4", "equipment": ["None"] },
                 { "name": "Side Kickthroughs", "videoPath": "/resources/sideKickthroughs.mp4", "equipment": ["None"] },
                 { "name": "V-Sit Cross Punches", "videoPath": "/resources/vSitCrossPunches.mp4", "equipment": ["None"] }

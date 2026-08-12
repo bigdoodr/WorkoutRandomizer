@@ -256,7 +256,7 @@ struct WorkoutDocument: FileDocument {
 
 struct WorkoutGeneratorView: View {
     @State private var selectedFocusAreas: Set<String> = []
-    @State private var difficulty = "Expert/Advanced"
+    @State private var selectedDifficulties: Set<String> = ["Beginner", "Medium", "Hard", "Expert/Advanced"]
     @State private var totalDuration = 10
     @State private var exerciseDuration = 20
     @State private var restDuration = 10
@@ -324,9 +324,10 @@ struct WorkoutGeneratorView: View {
             // "All" matched via special-case toggle logic
             QuickFilter(label: "All", icon: "figure.mixed.cardio",
                         keywordsAny: workoutFocusAreas.map { $0.lowercased() }, keywordsExclude: [], color: .blue),
-            // Cardio = every area EXCEPT those explicitly marked "No Cardio"
+            // Selects the dedicated "Cardio" focus area; generateWorkout() also folds in
+            // exercises cross-tagged additionalCategories: ["Cardio"] from other areas.
             QuickFilter(label: "Cardio", icon: "heart.fill",
-                        keywordsAny: workoutFocusAreas.map { $0.lowercased() }, keywordsExclude: ["no cardio"], color: .red),
+                        keywordsAny: ["cardio"], keywordsExclude: [], color: .red),
             QuickFilter(label: "Core", icon: "figure.core.training",
                         keywordsAny: ["core"], keywordsExclude: [], color: .orange),
             QuickFilter(label: "Upper", icon: "figure.arms.open",
@@ -405,6 +406,59 @@ struct WorkoutGeneratorView: View {
             )
             .frame(width: 36)
             .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var difficultyFilterRow: some View {
+        ZStack(alignment: .trailing) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(difficulties, id: \.self) { level in
+                        Button {
+                            if selectedDifficulties.contains(level) {
+                                selectedDifficulties.remove(level)
+                            } else {
+                                selectedDifficulties.insert(level)
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: difficultyIcon(level))
+                                Text(level)
+                            }
+                            .font(.subheadline)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(selectedDifficulties.contains(level) ? Color.blue : Color.gray.opacity(0.15))
+                            .foregroundStyle(selectedDifficulties.contains(level) ? .white : .primary)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 2)
+                .padding(.trailing, 24)
+            }
+            LinearGradient(
+                colors: [.clear, Color(platformBackgroundColor)],
+                startPoint: .leading, endPoint: .trailing
+            )
+            .frame(width: 36)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var generateButtonIsReady: Bool {
+        !selectedFocusAreas.isEmpty && !selectedDifficulties.isEmpty
+    }
+
+    private func difficultyIcon(_ level: String) -> String {
+        switch level {
+        case "Beginner": return "1.circle.fill"
+        case "Medium": return "2.circle.fill"
+        case "Hard": return "3.circle.fill"
+        case "Expert/Advanced": return "4.circle.fill"
+        default: return "circle.fill"
         }
     }
 
@@ -519,6 +573,7 @@ struct WorkoutGeneratorView: View {
                             focusAreaFilterRow
 
                         }
+                        .id("focusAreasSection")
 
                         // Equipment Available
                         VStack(alignment: .leading, spacing: 12) {
@@ -554,27 +609,15 @@ struct WorkoutGeneratorView: View {
                             }
                         }
 
-                        // Difficulty
+                        // Difficulty — multi-select: tap to toggle each level
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Difficulty")
                                 .font(.title2)
                                 .fontWeight(.semibold)
-                            
-                            HStack(spacing: 15) {
-                                ForEach(difficulties, id: \.self) { level in
-                                    HStack {
-                                        Image(systemName: difficulty == level ? "circle.fill" : "circle")
-                                            .foregroundStyle(difficulty == level ? .blue : .secondary)
-                                        Text(level)
-                                            .font(.subheadline)
-                                    }
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        difficulty = level
-                                    }
-                                }
-                            }
+
+                            difficultyFilterRow
                         }
+                        .id("difficultySection")
 
                         // Intention — single-select icon chips
                         VStack(alignment: .leading, spacing: 12) {
@@ -926,11 +969,17 @@ struct WorkoutGeneratorView: View {
 
                         // Generate Button
                         Button {
-                            generateWorkout()
-                            // Attempt to auto-scroll to the generated section after state updates
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                withAnimation {
-                                    proxy.scrollTo(scrollToGeneratedToken, anchor: .top)
+                            if selectedFocusAreas.isEmpty {
+                                withAnimation { proxy.scrollTo("focusAreasSection", anchor: .top) }
+                            } else if selectedDifficulties.isEmpty {
+                                withAnimation { proxy.scrollTo("difficultySection", anchor: .top) }
+                            } else {
+                                generateWorkout()
+                                // Attempt to auto-scroll to the generated section after state updates
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                    withAnimation {
+                                        proxy.scrollTo(scrollToGeneratedToken, anchor: .top)
+                                    }
                                 }
                             }
                         } label: {
@@ -939,17 +988,21 @@ struct WorkoutGeneratorView: View {
                                     ProgressView()
                                         .scaleEffect(0.8)
                                     Text("Generating workout...")
+                                } else if selectedFocusAreas.isEmpty {
+                                    Text("Focus Area(s) must be selected")
+                                } else if selectedDifficulties.isEmpty {
+                                    Text("Difficulty must be selected")
                                 } else {
                                     Text("Generate Workout")
                                 }
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(.blue)
-                            .foregroundStyle(.white)
+                            .background(generateButtonIsReady ? Color.blue : Color.gray.opacity(0.3))
+                            .foregroundStyle(generateButtonIsReady ? .white : .secondary)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
-                        .disabled(isGenerating || selectedFocusAreas.isEmpty)
+                        .disabled(isGenerating)
                         
                         if !generatedRoutine.isEmpty {
                             Text("Workout generated below")
@@ -1138,6 +1191,7 @@ struct WorkoutGeneratorView: View {
                 restEvery: restEvery,
                 timerStyle: timerStyle,
                 intention: selectedIntention,
+                selectedFocusAreas: selectedFocusAreas,
                 blocksConfig: timerStyle == .blocks ? RepeatingBlocksConfig(exercisesPerBlock: exercisesPerBlock, blockDurations: blockDurations) : nil,
                 enableSound_iOS_tv_vision: enableSound_iOS_tv_vision,
                 enableHaptics_iOS_vision: enableHaptics_iOS_vision,
@@ -1271,7 +1325,7 @@ struct WorkoutGeneratorView: View {
         isGenerating = true
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let allowedLevels = getAllowedLevels(for: difficulty)
+            let allowedLevels = Array(selectedDifficulties)
             var pool: [Exercise] = []
 
             // Build exercise pool, filtered by selected equipment
@@ -1284,6 +1338,22 @@ struct WorkoutGeneratorView: View {
                         }
                         pool.append(contentsOf: available)
                     }
+                }
+            }
+
+            // Cardio bonus: fold in exercises cross-tagged additionalCategories: ["Cardio"]
+            // from other focus areas (e.g. Squat Jumps under Legs, Mountain Climbers under
+            // Core) even when that area isn't itself selected — mirrors how stretch routines
+            // pull secondary-category exercises via exercisesByAdditionalCategory.
+            if selectedFocusAreas.contains("Cardio") {
+                let poolNames = Set(pool.map { $0.name })
+                let cardioByLevel = catalog.exercisesByAdditionalCategoryAndDifficulty["Cardio"] ?? [:]
+                for level in allowedLevels {
+                    guard let levelExercises = cardioByLevel[level] else { continue }
+                    let available = levelExercises.filter { ex in
+                        !poolNames.contains(ex.name) && ex.equipment.contains { selectedEquipment.contains($0) }
+                    }
+                    pool.append(contentsOf: available)
                 }
             }
 
@@ -1362,16 +1432,6 @@ struct WorkoutGeneratorView: View {
             showCustomTimers = false
             isGenerating = false
             scrollToGeneratedToken = UUID()
-        }
-    }
-    
-    private func getAllowedLevels(for difficulty: String) -> [String] {
-        switch difficulty {
-        case "Beginner": return ["Beginner"]
-        case "Medium": return ["Beginner", "Medium"]
-        case "Hard": return ["Beginner", "Medium", "Hard"]
-        case "Expert/Advanced": return ["Beginner", "Medium", "Hard", "Expert/Advanced"]
-        default: return ["Beginner"]
         }
     }
     
@@ -1506,6 +1566,7 @@ struct WorkoutPlayerView: View {
     let restEvery: Int
     let timerStyle: TimerStyle
     let intention: WorkoutIntention
+    var selectedFocusAreas: Set<String> = []
     let blocksConfig: RepeatingBlocksConfig?
     let enableSound_iOS_tv_vision: Bool
     let enableHaptics_iOS_vision: Bool
@@ -1535,6 +1596,7 @@ struct WorkoutPlayerView: View {
     @State private var intentionBanner: IntentionBannerPayload? = nil
     @State private var intentionBannerTask: Task<Void, Never>? = nil
     @State private var lastBannerExerciseTime: Int = -1
+    @State private var highIntensityStreakSeconds: Int = 0
     @State private var userMaxHeartRate: Double = 185 // default: age 35
 #if canImport(AVFoundation)
     @State private var audioEngine: AVAudioEngine?
@@ -2231,12 +2293,37 @@ struct WorkoutPlayerView: View {
 #endif
     }
     
+    #if canImport(HealthKit)
+    /// Classifies the session for HealthKit based on which focus areas were selected,
+    /// falling back to the chosen intention when the areas don't point at one specific
+    /// activity (e.g. a mixed Chest/Legs/Shoulders session).
+    private var resolvedActivityType: HKWorkoutActivityType {
+        let coreAreas: Set<String> = ["Core", "Core: Strength"]
+        let flexibilityAreas: Set<String> = [
+            "Morning Stretches", "Evening Recovery", "Cool Down", "Warm-Up: Hips", "Warm-Up: Full Body"
+        ]
+
+        if !selectedFocusAreas.isEmpty && selectedFocusAreas.isSubset(of: coreAreas) {
+            return .coreTraining
+        }
+        if !selectedFocusAreas.isEmpty && selectedFocusAreas.isSubset(of: flexibilityAreas) {
+            return .flexibility
+        }
+        switch intention {
+        case .strengthPower:
+            return .functionalStrengthTraining
+        case .generalFitness, .fatBurn, .cardioEndurance:
+            return .highIntensityIntervalTraining
+        }
+    }
+    #endif
+
     private func launchWatchWorkoutSession() {
         #if os(iOS)
         guard HKHealthStore.isHealthDataAvailable() else { return }
         let store = HKHealthStore()
         let configuration = HKWorkoutConfiguration()
-        configuration.activityType = .highIntensityIntervalTraining
+        configuration.activityType = resolvedActivityType
         configuration.locationType = .indoor
         store.startWatchApp(with: configuration) { success, error in
             if let error = error {
@@ -2279,6 +2366,12 @@ struct WorkoutPlayerView: View {
                         && currentExerciseTime % 30 == 0
                         && currentExerciseTime != lastBannerExerciseTime {
                         lastBannerExerciseTime = currentExerciseTime
+                        let zone = hrZoneName(bpm: hr, maxHR: userMaxHeartRate)
+                        if zone == "Zone 4" || zone == "Zone 5" {
+                            highIntensityStreakSeconds += 30
+                        } else {
+                            highIntensityStreakSeconds = 0
+                        }
                         showIntentionBannerIfNeeded(hr: hr)
                     }
                 }
@@ -2398,8 +2491,24 @@ struct WorkoutPlayerView: View {
         }
     }
 
+    // Zones 4-5 are meant for short bursts (per standard HR zone guidance: Zone 5 is
+    // "unsustainable for more than 1-3 minutes", Zone 4 is "only short phases possible").
+    // Once a continuous high-intensity streak crosses this, stop cheering the user on
+    // and nudge them to recover instead — regardless of intention.
+    private let highIntensitySafetyThresholdSeconds = 180
+
     private func intentionBannerPayload(hr: Double) -> IntentionBannerPayload? {
         let zone = hrZoneName(bpm: hr, maxHR: userMaxHeartRate)
+
+        if (zone == "Zone 4" || zone == "Zone 5")
+            && highIntensityStreakSeconds >= highIntensitySafetyThresholdSeconds {
+            return IntentionBannerPayload(
+                message: "You've been pushing hard for a while — ease back to recover before your next push.",
+                icon: "arrow.down.heart.fill",
+                tone: .nudgeDown
+            )
+        }
+
         switch (intention, zone) {
 
         // Fat Burn
@@ -2714,11 +2823,35 @@ struct WorkoutRecapView: View {
         }
     }
 
+    // Zones 4-5 are meant for short bursts, not the bulk of a session (standard HR
+    // zone guidance: Zone 4 is "only short phases possible", Zone 5 is "unsustainable
+    // for more than 1-3 minutes"). Crediting unlimited time in those zones toward
+    // "Excellent" alignment would reward unsafe sustained exertion, so credited time
+    // is capped: Zone 5 caps at 3 continuous-equivalent minutes, Zone 4 caps at 40% of
+    // total session time. `isOverexerted` checks the raw (uncapped) time so the UI can
+    // still warn about it even though the score no longer rewards it.
+    private static let zone5SafeCapSeconds: Double = 180
+    private static let zone4SafeCapFraction: Double = 0.4
+
+    private var isOverexerted: Bool {
+        guard totalTime > 0 else { return false }
+        let zone5Seconds = hrZoneDurations.count > 4 ? hrZoneDurations[4].seconds : 0
+        let zone4Seconds = hrZoneDurations.count > 3 ? hrZoneDurations[3].seconds : 0
+        return zone5Seconds > Self.zone5SafeCapSeconds
+            || zone4Seconds > Double(totalTime) * Self.zone4SafeCapFraction
+    }
+
     private var alignmentFraction: Double {
         let total = hrZoneDurations.reduce(0.0) { $0 + $1.seconds }
         guard total > 0 else { return 0 }
-        let targetTime = targetZoneIndices.compactMap { idx in
-            idx < hrZoneDurations.count ? hrZoneDurations[idx].seconds : nil
+        let targetTime = targetZoneIndices.compactMap { idx -> Double? in
+            guard idx < hrZoneDurations.count else { return nil }
+            let seconds = hrZoneDurations[idx].seconds
+            switch idx {
+            case 4:  return min(seconds, Self.zone5SafeCapSeconds)
+            case 3:  return min(seconds, total * Self.zone4SafeCapFraction)
+            default: return seconds
+            }
         }.reduce(0.0, +)
         return targetTime / total
     }
@@ -2771,6 +2904,19 @@ struct WorkoutRecapView: View {
                         if !hrZoneDurations.isEmpty {
                             RecapStatCard(title: intention.rawValue, value: "\(alignmentLabel)", icon: intention.icon, color: alignmentColor)
                         }
+                    }
+
+                    if isOverexerted {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("You spent extended time in Zones 4–5. These zones are meant for short bursts (Zone 5 is unsustainable past 1–3 minutes) — consider more recovery between pushes next time.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(12)
+                        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                     }
 
                     if !hrZoneDurations.isEmpty {

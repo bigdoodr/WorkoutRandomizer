@@ -66,6 +66,24 @@ final class ExerciseCatalog {
         return result
     }
 
+    /// Exercises keyed by secondary category then difficulty (from additionalCategories),
+    /// for pulling cross-tagged bonus exercises (e.g. "Cardio") into a difficulty-filtered pool.
+    var exercisesByAdditionalCategoryAndDifficulty: [String: [String: [Exercise]]] {
+        var result: [String: [String: [Exercise]]] = [:]
+        for (_, difficultyDict) in data.exercises {
+            for (level, catalogExercises) in difficultyDict {
+                for ce in catalogExercises {
+                    guard let additional = ce.additionalCategories else { continue }
+                    let ex = Exercise(name: ce.name, videoPath: ce.videoPath, equipment: ce.equipment ?? ["None"], singleSided: ce.singleSided ?? false, isMovement: ce.isMovement ?? false)
+                    for category in additional {
+                        result[category, default: [:]][level, default: []].append(ex)
+                    }
+                }
+            }
+        }
+        return result
+    }
+
     /// Flat dictionary of exercise name -> video path, for VideoManager.
     var videoPaths: [String: String] {
         var result: [String: String] = [:]
