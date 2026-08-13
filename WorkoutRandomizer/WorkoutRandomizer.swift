@@ -1050,13 +1050,13 @@ struct WorkoutGeneratorView: View {
                                             Spacer()
                                             if showCustomTimers && exercise.name != "Rest" {
                                                 HStack(spacing: 4) {
-                                                    Text("\(exerciseDurationOverrides[index] ?? exerciseDuration)s")
+                                                    Text("\(exerciseDurationOverrides[index] ?? defaultDuration(forIndex: index, exercise: exercise))s")
                                                         .font(.caption)
                                                         .foregroundStyle(.secondary)
                                                         .frame(minWidth: 32, alignment: .trailing)
                                                     Stepper(
                                                         value: Binding(
-                                                            get: { exerciseDurationOverrides[index] ?? exerciseDuration },
+                                                            get: { exerciseDurationOverrides[index] ?? defaultDuration(forIndex: index, exercise: exercise) },
                                                             set: { exerciseDurationOverrides[index] = $0 }
                                                         ),
                                                         in: 5...300, step: 5
@@ -1065,13 +1065,13 @@ struct WorkoutGeneratorView: View {
                                                 }
                                             } else if showCustomTimers && exercise.name == "Rest" {
                                                 HStack(spacing: 4) {
-                                                    Text("\(exerciseDurationOverrides[index] ?? restDuration)s")
+                                                    Text("\(exerciseDurationOverrides[index] ?? defaultDuration(forIndex: index, exercise: exercise))s")
                                                         .font(.caption)
                                                         .foregroundStyle(.blue)
                                                         .frame(minWidth: 32, alignment: .trailing)
                                                     Stepper(
                                                         value: Binding(
-                                                            get: { exerciseDurationOverrides[index] ?? restDuration },
+                                                            get: { exerciseDurationOverrides[index] ?? defaultDuration(forIndex: index, exercise: exercise) },
                                                             set: { exerciseDurationOverrides[index] = $0 }
                                                         ),
                                                         in: 5...300, step: 5
@@ -1198,6 +1198,9 @@ struct WorkoutGeneratorView: View {
                 enableSound_macOS: enableSound_macOS,
                 durationOverrides: exerciseDurationOverrides.isEmpty ? nil : exerciseDurationOverrides
             )
+            // A stray scroll/swipe shouldn't be able to abruptly end an active routine —
+            // stopping now requires the confirmed Stop button inside the player.
+            .interactiveDismissDisabled(true)
         }
         .sheet(isPresented: $showingTutorial) {
             TutorialView()
@@ -1321,6 +1324,28 @@ struct WorkoutGeneratorView: View {
         })
     }
     
+    // Mirrors WorkoutPlayerView.durationForCurrentPosition's pyramid/blocks math so the
+    // Custom Timers editor shows the duration that will actually run before it's overridden,
+    // instead of always showing the flat Standard-style exerciseDuration/restDuration.
+    private func defaultDuration(forIndex index: Int, exercise: Exercise) -> Int {
+        let isRestSlot = exercise.name == "Rest"
+        if timerStyle == .pyramid {
+            let workBefore = generatedRoutine[0..<min(index, generatedRoutine.count)].filter { $0.name != "Rest" }.count
+            let phase = isRestSlot ? max(0, workBefore - 1) : workBefore
+            let interval = WorkoutPlayerView.pyramidIntervals[phase % WorkoutPlayerView.pyramidIntervals.count]
+            return isRestSlot ? interval.rest : interval.work
+        }
+        if timerStyle == .blocks {
+            let workBefore = generatedRoutine[0..<min(index, generatedRoutine.count)].filter { $0.name != "Rest" }.count
+            let exercisePos = isRestSlot ? max(0, workBefore - 1) : workBefore
+            let superSetSize = blockDurations.count * exercisesPerBlock
+            let posInSuperSet = exercisePos % max(1, superSetSize)
+            let blockIdx = min(posInSuperSet / max(1, exercisesPerBlock), blockDurations.count - 1)
+            return blockDurations[blockIdx]
+        }
+        return isRestSlot ? restDuration : exerciseDuration
+    }
+
     private func generateWorkout() {
         isGenerating = true
 
@@ -1364,14 +1389,6 @@ struct WorkoutGeneratorView: View {
                 }
             }
 
-            // Expand single-sided exercises into Left/Right pairs so each side gets its own timed slot
-            pool = pool.flatMap { ex -> [Exercise] in
-                guard ex.singleSided else { return [ex] }
-                let left  = Exercise(name: "\(ex.name) (Left)",  videoPath: ex.videoPath, equipment: ex.equipment, isMovement: ex.isMovement)
-                let right = Exercise(name: "\(ex.name) (Right)", videoPath: ex.videoPath, equipment: ex.equipment, isMovement: ex.isMovement)
-                return [left, right]
-            }
-
             guard !pool.isEmpty else {
                 isGenerating = false
                 return
@@ -1402,10 +1419,20 @@ struct WorkoutGeneratorView: View {
                 let exercises: [Exercise]
                 if timerStyle == .blocks && shuffleBlockSets && blocksTotalSets > 1 {
                     let setSize = blocksCount * exercisesPerBlock
-                    let basePool = Array(selected.prefix(setSize))
+                    var basePool = Array(selected.prefix(setSize))
+                    // Don't split a Left/Right pair across the set boundary — pull the
+                    // matching Right in so shuffling never separates the two sides.
+                    if let last = basePool.last, last.name.hasSuffix(" (Left)"),
+                       basePool.count < selected.count,
+                       selected[basePool.count].name == last.name.replacingOccurrences(of: " (Left)", with: " (Right)") {
+                        basePool.append(selected[basePool.count])
+                    }
+                    // Shuffle Left/Right pairs as a single atomic unit so the two sides
+                    // always stay back-to-back after shuffling.
+                    let baseUnits = atomicSideUnits(basePool)
                     var shuffled: [Exercise] = []
                     for _ in 0..<blocksTotalSets {
-                        shuffled.append(contentsOf: basePool.shuffled())
+                        shuffled.append(contentsOf: baseUnits.shuffled().flatMap { $0 })
                     }
                     exercises = shuffled
                 } else {
@@ -1435,11 +1462,41 @@ struct WorkoutGeneratorView: View {
         }
     }
     
+    // Single-sided exercises are chosen as one slot but always expand into their
+    // Left/Right pair together, so the two sides land back-to-back in the routine
+    // (only a rest, never another exercise, can end up between them).
+    private func expandSides(_ exercise: Exercise) -> [Exercise] {
+        guard exercise.singleSided else { return [exercise] }
+        let left  = Exercise(name: "\(exercise.name) (Left)",  videoPath: exercise.videoPath, equipment: exercise.equipment, isMovement: exercise.isMovement)
+        let right = Exercise(name: "\(exercise.name) (Right)", videoPath: exercise.videoPath, equipment: exercise.equipment, isMovement: exercise.isMovement)
+        return [left, right]
+    }
+
+    // Groups a flat exercise list into shuffle-safe units: an adjacent Left/Right
+    // pair stays together as one unit, everything else is its own unit.
+    private func atomicSideUnits(_ exercises: [Exercise]) -> [[Exercise]] {
+        var units: [[Exercise]] = []
+        var i = 0
+        while i < exercises.count {
+            let current = exercises[i]
+            if current.name.hasSuffix(" (Left)"),
+               i + 1 < exercises.count,
+               exercises[i + 1].name == current.name.replacingOccurrences(of: " (Left)", with: " (Right)") {
+                units.append([current, exercises[i + 1]])
+                i += 2
+            } else {
+                units.append([current])
+                i += 1
+            }
+        }
+        return units
+    }
+
     private func createBalancedRoutine(from pool: [Exercise], maxCount: Int) -> [Exercise] {
         let shuffled = pool.shuffled()
         var uniqueExercises: [Exercise] = []
         var seen = Set<String>()
-        
+
         // Get unique exercises first
         for exercise in shuffled {
             if !seen.contains(exercise.name) && uniqueExercises.count < maxCount {
@@ -1447,20 +1504,22 @@ struct WorkoutGeneratorView: View {
                 seen.insert(exercise.name)
             }
         }
-        
+
+        var result: [Exercise] = []
+        for exercise in uniqueExercises {
+            if result.count >= maxCount { break }
+            result.append(contentsOf: expandSides(exercise))
+        }
+
         // Fill remaining slots with repeats
-        var result = uniqueExercises
         while result.count < maxCount {
             let reshuffled = uniqueExercises.shuffled()
             for exercise in reshuffled {
-                if result.count < maxCount {
-                    result.append(exercise)
-                } else {
-                    break
-                }
+                if result.count >= maxCount { break }
+                result.append(contentsOf: expandSides(exercise))
             }
         }
-        
+
         return result
     }
     
@@ -1592,6 +1651,7 @@ struct WorkoutPlayerView: View {
     @State private var peakHeartRate: Double = 0
     @State private var heartRateSamples: [Double] = []
     @State private var showingRecap = false
+    @State private var showingStopConfirmation = false
     // HR intention banner
     @State private var intentionBanner: IntentionBannerPayload? = nil
     @State private var intentionBannerTask: Task<Void, Never>? = nil
@@ -1778,16 +1838,18 @@ struct WorkoutPlayerView: View {
                         }
                         #endif
 
-                        // Pyramid level indicator
+                        // Pyramid level indicator — shows the duration actually being counted
+                        // down (durationForCurrentPosition), so a custom timer override for
+                        // this exercise is reflected here instead of the un-overridden phase value.
                         if timerStyle == .pyramid && isPlaying {
                             let phase = currentPyramidPhase
-                            let interval = WorkoutPlayerView.pyramidIntervals[phase]
-                            Text("Pyramid \(phase + 1) of \(WorkoutPlayerView.pyramidIntervals.count)  •  \(isRest ? interval.rest : interval.work)s")
+                            Text("Pyramid \(phase + 1) of \(WorkoutPlayerView.pyramidIntervals.count)  •  \(durationForCurrentPosition)s")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
 
-                        // Blocks progress indicator
+                        // Blocks progress indicator — same rationale as above: use the
+                        // override-aware duration rather than the raw block config value.
                         if timerStyle == .blocks && isPlaying, let config = blocksConfig {
                             let workBefore = routine[0..<min(currentIndex, routine.count)].filter { $0.name != "Rest" }.count
                             let exercisePos = isRest ? max(0, workBefore - 1) : workBefore
@@ -1795,7 +1857,7 @@ struct WorkoutPlayerView: View {
                             let posInSuperSet = exercisePos % max(1, superSetSize)
                             let blockIdx = min(posInSuperSet / max(1, config.exercisesPerBlock), config.blockDurations.count - 1)
                             let setNum = exercisePos / max(1, superSetSize) + 1
-                            Text("Block \(blockIdx + 1) of \(config.blockDurations.count)  •  Set \(setNum)  •  \(config.blockDurations[blockIdx])s")
+                            Text("Block \(blockIdx + 1) of \(config.blockDurations.count)  •  Set \(setNum)  •  \(durationForCurrentPosition)s")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1881,19 +1943,30 @@ struct WorkoutPlayerView: View {
             .toolbar {
 #if os(iOS) || os(visionOS)
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        stopWorkout()
-                        dismiss()
+                    Button("Stop", role: .destructive) {
+                        showingStopConfirmation = true
                     }
                 }
 #else
                 ToolbarItem {
-                    Button("Done") {
-                        stopWorkout()
-                        dismiss()
+                    Button("Stop", role: .destructive) {
+                        showingStopConfirmation = true
                     }
                 }
 #endif
+            }
+            .confirmationDialog(
+                "Stop this workout?",
+                isPresented: $showingStopConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Stop Workout", role: .destructive) {
+                    stopWorkout()
+                    dismiss()
+                }
+                Button("Keep Going", role: .cancel) { }
+            } message: {
+                Text("Your progress won't be saved to the recap.")
             }
             .overlay(alignment: .top) {
                 if let banner = intentionBanner {

@@ -310,6 +310,14 @@ private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
                 }
                 WorkoutConnectivityManager.shared.receiveZoneData(zones)
             }
+        case "zoneThresholds":
+            // Delivered live (in addition to the queued transferUserInfo copy) so the
+            // phone adopts the watch's actual zone boundaries within the first second or
+            // two of a workout, instead of computing zones from a different formula
+            // (220-age) until the slower queued delivery eventually arrives.
+            if let thresholds = message["thresholds"] as? [Double] {
+                WorkoutConnectivityManager.shared.receiveZoneThresholds(thresholds)
+            }
         default:
             break
         }

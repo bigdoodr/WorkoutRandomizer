@@ -129,9 +129,20 @@ class WorkoutSessionManager: NSObject, ObservableObject {
         // Relay resolved thresholds to iPhone so its live zone display stays in sync
         // with the watch's classification (they may differ if HealthKit holds a custom
         // zone config with a different effective max HR than the 220-age formula).
+        // Send immediately via sendMessage while the phone is reachable (it's actively
+        // driving the workout right now) — transferUserInfo alone is queued/best-effort
+        // and can arrive minutes late, during which the phone falls back to its own
+        // 220-age estimate and shows a different zone than the watch. transferUserInfo
+        // is still queued as a reliable backup in case the phone isn't reachable this instant.
         let resolvedThresholds = zoneThresholds
         if !resolvedThresholds.isEmpty && WCSession.isSupported() {
-            WCSession.default.transferUserInfo(["type": "zoneThresholds", "thresholds": resolvedThresholds])
+            let session = WCSession.default
+            if session.isReachable {
+                session.sendMessage(["type": "zoneThresholds", "thresholds": resolvedThresholds], replyHandler: nil) { error in
+                    print("Failed to send zoneThresholds message: \(error.localizedDescription)")
+                }
+            }
+            session.transferUserInfo(["type": "zoneThresholds", "thresholds": resolvedThresholds])
         }
 
         do {
