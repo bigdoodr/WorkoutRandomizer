@@ -56,6 +56,8 @@ struct WorkoutGeneratorView: View {
     @State private var showSaveConfirmation = false
     /// Routine indices where each ladder round begins; empty for non-ladder styles.
     @State private var ladderRoundStarts: [Int] = []
+    @AppStorage("addWarmUp") private var addWarmUp = false
+    @AppStorage("addCoolDown") private var addCoolDown = false
 
     @StateObject private var videoManager = VideoManager.shared
     @State private var catalog = ExerciseCatalog.shared
@@ -290,6 +292,17 @@ struct WorkoutGeneratorView: View {
             overrides: exerciseDurationOverrides,
             pyramidLadder: pyramidPlan.ladder
         )
+    }
+
+    /// Human-readable size of the warm-up that would be added at the current total duration.
+    var warmUpSummary: String {
+        let targetSeconds = max(Self.warmUpSecondsPerMove, totalDuration * 60 / 10)
+        let moves = min(8, max(1, targetSeconds / Self.warmUpSecondsPerMove))
+        return "\(moves) × \(Self.warmUpSecondsPerMove)s"
+    }
+
+    var coolDownSummary: String {
+        "\(Self.coolDownHoldCount) × \(Self.coolDownSecondsPerHold)s"
     }
 
     /// The pyramid sized for the currently-selected total duration.
@@ -694,6 +707,34 @@ struct WorkoutGeneratorView: View {
                                         }
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        // Warm-Up & Cool-Down — applies to every timer style, so it sits
+                        // outside the Durations section (which Blocks doesn't show).
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Warm-Up & Cool-Down")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+
+                            Toggle(isOn: $addWarmUp) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Add warm-up")
+                                        .font(.subheadline)
+                                    Text("About a tenth of your workout (\(warmUpSummary)), matched to your focus areas")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Toggle(isOn: $addCoolDown) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Add cool-down")
+                                        .font(.subheadline)
+                                    Text("Two focus-relevant stretches at the end (\(coolDownSummary))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -1303,12 +1344,7 @@ struct WorkoutGeneratorView: View {
                 // No trailing rest after the final exercise of the routine.
                 if routine.last?.name == "Rest" { routine.removeLast() }
 
-                generatedRoutine = routine
-                ladderRoundStarts = roundStarts
-                exerciseDurationOverrides.removeAll()
-                showCustomTimers = false
-                isGenerating = false
-                scrollToGeneratedToken = UUID()
+                publish(routine: routine, roundStarts: roundStarts)
                 return
             }
 
@@ -1373,12 +1409,7 @@ struct WorkoutGeneratorView: View {
                 }
             }
 
-            generatedRoutine = routine
-            ladderRoundStarts = []
-            exerciseDurationOverrides.removeAll()
-            showCustomTimers = false
-            isGenerating = false
-            scrollToGeneratedToken = UUID()
+            publish(routine: routine)
         }
     }
     
@@ -1410,6 +1441,102 @@ struct WorkoutGeneratorView: View {
             }
         }
         return units
+    }
+
+    // MARK: - Warm-up & cool-down
+
+    private static let warmUpCategories = ["Warm-Up: Full Body", "Warm-Up: Hips"]
+    private static let coolDownCategories = ["Cool Down"]
+    /// Each warm-up move runs this long; cool-down holds run longer to be worth doing.
+    private static let warmUpSecondsPerMove = 30
+    private static let coolDownSecondsPerHold = 30
+    private static let coolDownHoldCount = 2
+
+    /// Every stretch belonging to the given categories, whether by its own focus area or by
+    /// cross-tag, deduplicated by name.
+    private func preparationCandidates(categories: [String]) -> [Exercise] {
+        var result: [Exercise] = []
+        var seen = Set<String>()
+        for category in categories {
+            var found: [Exercise] = []
+            if let byDifficulty = exercises[category] {
+                found += byDifficulty.values.flatMap { $0 }
+            }
+            found += catalog.exercisesByAdditionalCategory[category] ?? []
+            for exercise in found where !seen.contains(exercise.name) {
+                seen.insert(exercise.name)
+                result.append(exercise)
+            }
+        }
+        return result
+    }
+
+    /// Narrow a stretch pool to the selected focus areas. An untagged stretch suits any focus,
+    /// so it always stays in — that guarantees the pool is never empty, without a special case.
+    private func matchingSelectedFocus(_ candidates: [Exercise]) -> [Exercise] {
+        let matched = candidates.filter { exercise in
+            exercise.relatedFocusAreas.isEmpty
+                || !Set(exercise.relatedFocusAreas).isDisjoint(with: selectedFocusAreas)
+        }
+        return matched.isEmpty ? candidates : matched
+    }
+
+    /// Warm-up sized to roughly a tenth of the session — about a minute for a 10 minute
+    /// workout — using stretches relevant to the focus areas selected.
+    private func buildWarmUp() -> [Exercise] {
+        guard addWarmUp else { return [] }
+        let pool = matchingSelectedFocus(preparationCandidates(categories: Self.warmUpCategories))
+        guard !pool.isEmpty else { return [] }
+        let targetSeconds = max(Self.warmUpSecondsPerMove, totalDuration * 60 / 10)
+        let wanted = min(8, max(1, targetSeconds / Self.warmUpSecondsPerMove))
+        // Mobility flows straight through — no rests between warm-up moves.
+        return pool.shuffled().prefix(wanted).map {
+            var move = $0
+            move.preparationDuration = Self.warmUpSecondsPerMove
+            return move
+        }
+    }
+
+    /// A short cool-down: a couple of focus-relevant holds. Two-sided stretches are preferred so
+    /// the cool-down stays brief rather than doubling into Left/Right.
+    private func buildCoolDown() -> [Exercise] {
+        guard addCoolDown else { return [] }
+        let pool = matchingSelectedFocus(preparationCandidates(categories: Self.coolDownCategories))
+        guard !pool.isEmpty else { return [] }
+        let preferred = pool.filter { !$0.singleSided }
+        let chosen = (preferred.count >= Self.coolDownHoldCount ? preferred : pool)
+            .shuffled().prefix(Self.coolDownHoldCount)
+        return chosen.flatMap { hold -> [Exercise] in
+            expandSides(hold).map {
+                var side = $0
+                side.preparationDuration = Self.coolDownSecondsPerHold
+                return side
+            }
+        }
+    }
+
+    /// Wrap the generated work in its warm-up and cool-down and publish the result. Every timer
+    /// style funnels through here so the wrapping — and the round-index shift it causes — is
+    /// handled in exactly one place.
+    private func publish(routine core: [Exercise], roundStarts: [Int] = []) {
+        let warmUp = buildWarmUp()
+        var routine = warmUp + core
+        if !warmUp.isEmpty, let first = core.first, !first.isPreparation {
+            // One breath between the warm-up and the first working set.
+            var transition = Exercise(name: "Rest", videoPath: nil, equipment: ["None"])
+            transition.preparationDuration = effectiveRestDuration
+            routine = warmUp + [transition] + core
+        }
+        let offset = routine.count - core.count
+        routine += buildCoolDown()
+
+        generatedRoutine = routine
+        // Round markers were computed against the un-wrapped routine, so shift them.
+        ladderRoundStarts = roundStarts.map { $0 + offset }
+        exerciseDurationOverrides.removeAll()
+        showCustomTimers = false
+        isGenerating = false
+        scrollToGeneratedToken = UUID()
     }
 
     // MARK: - Ladder styles (Add-On / Add-On + Take Away)

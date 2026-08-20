@@ -54,23 +54,24 @@ struct WorkoutWatchView: View {
             Text("A workout is running on your iPhone. Would you like to track it with Apple Health?")
         }
         .onAppear {
-            displayTime = workoutState?.timeRemaining ?? 0
+            syncDisplayTime()
             refreshLocalTicker()
         }
         .onDisappear {
             localTicker?.invalidate()
             localTicker = nil
         }
-        // Phone sent a timer tick — accept it as ground truth and record when it arrived
-        .onChange(of: workoutState?.timeRemaining) { _, newTime in
-            guard let newTime else { return }
-            displayTime = newTime
-            lastPhoneUpdateAt = Date()
+        // Phone sent a timer tick — re-derive rather than trusting the number verbatim
+        .onChange(of: workoutState?.timeRemaining) { _, _ in
+            syncDisplayTime()
+        }
+        .onChange(of: connectivityManager.slotDeadline) { _, _ in
+            syncDisplayTime()
+            refreshLocalTicker()
         }
         // New exercise or exercise index change — reset display time
         .onChange(of: workoutState?.currentIndex) { _, _ in
-            displayTime = workoutState?.timeRemaining ?? 0
-            lastPhoneUpdateAt = Date()
+            syncDisplayTime()
             refreshLocalTicker()
         }
         // Play/pause — start or stop the local ticker
@@ -177,9 +178,25 @@ struct WorkoutWatchView: View {
         }
     }
 
-    // Starts (or restarts) a 1-second fallback ticker. The ticker only decrements
-    // displayTime when the phone hasn't sent an update in the last 1.5 s — i.e.
-    // it only fires when the Bluetooth link is momentarily unavailable.
+    /// Recomputes the countdown from the phone's deadline. Because the deadline is an absolute
+    /// moment, this is correct no matter how long the message spent in flight — the whole point
+    /// of the change. Falls back to the raw value when paired with an older phone build that
+    /// doesn't send one.
+    private func syncDisplayTime() {
+        if let deadline = connectivityManager.slotDeadline {
+            displayTime = max(0, Int(deadline.timeIntervalSinceNow.rounded()))
+        } else {
+            displayTime = workoutState?.timeRemaining ?? 0
+        }
+        lastPhoneUpdateAt = Date()
+    }
+
+    // A 1-second ticker keeps the display honest between messages.
+    //
+    // With a deadline it simply recomputes from absolute time every tick, so a dropped or
+    // delayed message costs nothing and nothing accumulates. Without one (older phone build) it
+    // falls back to the previous behaviour: decrement locally, but only once the phone has gone
+    // quiet for more than 1.5 s, so it doesn't fight the incoming updates.
     private func refreshLocalTicker() {
         localTicker?.invalidate()
         guard let state = workoutState, state.isPlaying, !state.isPaused else {
@@ -187,8 +204,11 @@ struct WorkoutWatchView: View {
             return
         }
         localTicker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            guard Date().timeIntervalSince(lastPhoneUpdateAt) > 1.5 else { return }
-            displayTime = max(0, displayTime - 1)
+            if let deadline = connectivityManager.slotDeadline {
+                displayTime = max(0, Int(deadline.timeIntervalSinceNow.rounded()))
+            } else if Date().timeIntervalSince(lastPhoneUpdateAt) > 1.5 {
+                displayTime = max(0, displayTime - 1)
+            }
         }
     }
 

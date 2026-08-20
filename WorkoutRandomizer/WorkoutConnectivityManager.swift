@@ -96,10 +96,14 @@ class WorkoutConnectivityManager: ObservableObject {
         guard session.isReachable else { return }
         do {
             let data = try JSONEncoder().encode(state)
+            let now = Date().timeIntervalSince1970
             let message: [String: Any] = [
                 "type": "workoutState",
                 "payload": data,
-                "sentAt": Date().timeIntervalSince1970
+                // Carry the deadline on the transition too, so the watch starts the new slot
+                // from absolute time rather than from a value that is already in the past.
+                "deadline": now + Double(state.timeRemaining),
+                "sentAt": now
             ]
             session.sendMessage(message, replyHandler: nil) { error in
                 print("Failed to send workout state: \(error.localizedDescription)")
@@ -144,9 +148,25 @@ class WorkoutConnectivityManager: ObservableObject {
         }
     }
 
+    /// Sends the moment the current slot ends rather than how many seconds are left.
+    ///
+    /// A bare countdown value is only correct at the instant it is sent: whatever delay the
+    /// Bluetooth link adds, the watch renders a number that is already stale, and once delivery
+    /// latency exceeds the one-second send interval the messages queue and the watch falls
+    /// progressively further behind. An absolute deadline is self-correcting — a message that
+    /// arrives two seconds late still resolves to the right remaining time, because the watch
+    /// subtracts its own clock rather than trusting ours.
+    ///
+    /// `timeRemaining` is still sent so an older watch build paired with this phone keeps working.
     func sendTimerUpdate(timeRemaining: Int) {
         guard let session = session, session.isReachable else { return }
-        let message: [String: Any] = ["type": "timerUpdate", "timeRemaining": timeRemaining]
+        let now = Date().timeIntervalSince1970
+        let message: [String: Any] = [
+            "type": "timerUpdate",
+            "timeRemaining": timeRemaining,
+            "deadline": now + Double(timeRemaining),
+            "sentAt": now
+        ]
         session.sendMessage(message, replyHandler: nil)
     }
 

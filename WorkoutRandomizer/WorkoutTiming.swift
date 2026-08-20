@@ -107,7 +107,10 @@ struct WorkoutTiming {
     /// downstream — that is why prepended items will need to be excluded from this count.
     func exercisePosition(at index: Int, in routine: [Exercise]) -> Int {
         let upper = min(max(index, 0), routine.count)
-        let workBefore = routine[0..<upper].filter { $0.name != "Rest" }.count
+        // Warm-up and cool-down slots are skipped entirely. Counting them would shift every
+        // Pyramid phase and Blocks index downstream — a 3-exercise warm-up with 3 exercises
+        // per block would silently start the routine on Block 2.
+        let workBefore = routine[0..<upper].filter { $0.name != "Rest" && !$0.isPreparation }.count
         let isRest = routine.indices.contains(index) && routine[index].name == "Rest"
         return isRest ? max(0, workBefore - 1) : workBefore
     }
@@ -148,6 +151,8 @@ struct WorkoutTiming {
     /// Use this when showing what a slot *would* run, before per-slot customisation.
     func baseDuration(at index: Int, in routine: [Exercise]) -> Int {
         guard routine.indices.contains(index) else { return 0 }
+        // Warm-up and cool-down carry their own duration and ignore the timer style.
+        if let preparation = routine[index].preparationDuration { return preparation }
         let isRest = routine[index].name == "Rest"
 
         switch style {

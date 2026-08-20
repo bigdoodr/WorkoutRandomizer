@@ -40,6 +40,14 @@ class WorkoutConnectivityManager: NSObject, ObservableObject {
     /// Used to discard stale application contexts delivered late by the system —
     /// the cause of the watch dropping back to "No Active Workout" mid-session.
     private var lastEventAt: TimeInterval = 0
+    /// Absolute moment the current exercise or rest ends, as told by the phone. The watch
+    /// counts down to this rather than trusting whatever number last arrived, so link latency
+    /// no longer accumulates into visible drift. Nil when the phone is on an older build that
+    /// doesn't send one.
+    @Published var slotDeadline: Date?
+    /// Send-time of the most recently applied timer tick, used to drop out-of-order deliveries —
+    /// without it a late message can bump the countdown back up.
+    private var lastTimerSentAt: TimeInterval = 0
     /// Timestamp of the last handled completion. Completions can arrive multiple
     /// times (live message, application context, and inside later sessionEnded
     /// contexts) — this de-duplicates them. Persisted so a relaunch doesn't
@@ -198,11 +206,21 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
             case "workoutState":
                 if let data = message["payload"] as? Data {
                     self.lastEventAt = max(self.lastEventAt, sentAt)
+                    // A transition resets the slot, so its deadline always wins.
+                    self.lastTimerSentAt = sentAt
+                    self.slotDeadline = (message["deadline"] as? TimeInterval)
+                        .map { Date(timeIntervalSince1970: $0) }
                     self.decodeAndApplyState(data)
                 }
 
             // --- Timer tick ---
             case "timerUpdate":
+                // Messages can arrive out of order; an older tick must not win.
+                guard sentAt >= self.lastTimerSentAt else { return }
+                self.lastTimerSentAt = sentAt
+                if let deadline = message["deadline"] as? TimeInterval {
+                    self.slotDeadline = Date(timeIntervalSince1970: deadline)
+                }
                 if let time = message["timeRemaining"] as? Int {
                     self.applyTimerUpdate(time)
                 }

@@ -29,6 +29,12 @@ struct Exercise {
     /// Workout focus areas this exercise is relevant to beyond its own category. Only
     /// populated for warm-up and cool-down stretches; empty means "suits any focus".
     var relatedFocusAreas: [String] = []
+    /// Non-nil for warm-up and cool-down slots. These run at their own fixed duration and sit
+    /// *outside* the timer style's phase counting — see `WorkoutTiming.exercisePosition`.
+    var preparationDuration: Int? = nil
+
+    /// True for warm-up and cool-down slots, including the rests between them.
+    var isPreparation: Bool { preparationDuration != nil }
 }
 
 enum TimerStyle: String, CaseIterable, Identifiable {
