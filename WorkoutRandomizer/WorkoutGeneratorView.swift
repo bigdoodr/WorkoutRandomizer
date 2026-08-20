@@ -1282,12 +1282,25 @@ struct WorkoutGeneratorView: View {
     }
     
     private func exportWorkout() {
-        let exportableExercises = generatedRoutine.map { exercise in
-            ExportableExercise(
+        // Durations must come from the resolver, not the flat Standard-style values —
+        // otherwise a Pyramid or Blocks routine exports with whatever exerciseDuration
+        // happens to be set, and any Custom Timers edits are dropped entirely.
+        let exportableExercises = generatedRoutine.enumerated().map { index, exercise in
+            let isRest = exercise.name == "Rest"
+            // A non-rest slot carries the rest that actually follows it; when no rest follows
+            // (rest frequency > 1) fall back to the configured value, as before.
+            let followingRest: Int = {
+                guard !isRest else { return 0 }
+                let next = index + 1
+                guard next < generatedRoutine.count,
+                      generatedRoutine[next].name == "Rest" else { return restDuration }
+                return timing.duration(at: next, in: generatedRoutine)
+            }()
+            return ExportableExercise(
                 name: exercise.name,
                 isTimeBased: true,
-                exerciseDuration: exercise.name == "Rest" ? restDuration : exerciseDuration,
-                restDuration: exercise.name == "Rest" ? 0 : restDuration,
+                exerciseDuration: timing.duration(at: index, in: generatedRoutine),
+                restDuration: followingRest,
                 sets: 1
             )
         }
@@ -1302,7 +1315,7 @@ struct WorkoutGeneratorView: View {
         var savedExercises: [SavedRoutineExercise] = []
         for (i, ex) in generatedRoutine.enumerated() {
             if ex.name == "Rest" {
-                let restDur = exerciseDurationOverrides[i] ?? restDuration
+                let restDur = timing.duration(at: i, in: generatedRoutine)
                 if !savedExercises.isEmpty {
                     let last = savedExercises[savedExercises.count - 1]
                     savedExercises[savedExercises.count - 1] = SavedRoutineExercise(
@@ -1314,7 +1327,7 @@ struct WorkoutGeneratorView: View {
                     )
                 }
             } else {
-                let dur = exerciseDurationOverrides[i] ?? exerciseDuration
+                let dur = timing.duration(at: i, in: generatedRoutine)
                 savedExercises.append(SavedRoutineExercise(
                     name: ex.name,
                     duration: dur,
