@@ -28,7 +28,6 @@ A flexible xOS bodyweight workout app that generates randomized exercise routine
 
 - iOS/iPadOS 18.6 or later
 - macOS 15.6 or later
-- visionOS 26.2 or later
 - watchOS 26.2 or later (companion app)
 
 ## Installation

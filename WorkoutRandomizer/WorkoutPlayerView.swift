@@ -34,9 +34,17 @@ struct WorkoutPlayerView: View {
     let enableSound_macOS: Bool
     var durationOverrides: [Int: Int]? = nil
 
-    static let pyramidIntervals: [(work: Int, rest: Int)] = [
-        (30, 30), (40, 40), (50, 50), (50, 50), (40, 40), (30, 30)
-    ]
+    /// All timing rules live in WorkoutTiming so the player and the generator's Custom Timers
+    /// editor can never disagree about how long a slot runs.
+    private var timing: WorkoutTiming {
+        WorkoutTiming(
+            style: timerStyle,
+            exerciseDuration: exerciseDuration,
+            restDuration: restDuration,
+            blocksConfig: blocksConfig,
+            overrides: durationOverrides ?? [:]
+        )
+    }
 
     @State private var currentIndex = 0
     @State private var timeRemaining = 0
@@ -104,29 +112,11 @@ struct WorkoutPlayerView: View {
     }
 
     private var currentPyramidPhase: Int {
-        guard timerStyle == .pyramid else { return 0 }
-        let workBefore = routine[0..<min(currentIndex, routine.count)].filter { $0.name != "Rest" }.count
-        let phase = isRest ? max(0, workBefore - 1) : workBefore
-        return phase % Self.pyramidIntervals.count
+        timing.pyramidPhase(at: currentIndex, in: routine)
     }
 
     private var durationForCurrentPosition: Int {
-        guard let exercise = currentExercise else { return 0 }
-        // Per-exercise override takes highest priority
-        if let override = durationOverrides?[currentIndex] { return override }
-        if timerStyle == .pyramid {
-            let interval = Self.pyramidIntervals[currentPyramidPhase]
-            return exercise.name == "Rest" ? interval.rest : interval.work
-        }
-        if timerStyle == .blocks, let config = blocksConfig {
-            let workBefore = routine[0..<min(currentIndex, routine.count)].filter { $0.name != "Rest" }.count
-            let exercisePos = isRest ? max(0, workBefore - 1) : workBefore
-            let superSetSize = config.blockDurations.count * config.exercisesPerBlock
-            let posInSuperSet = exercisePos % max(1, superSetSize)
-            let blockIdx = min(posInSuperSet / max(1, config.exercisesPerBlock), config.blockDurations.count - 1)
-            return config.blockDurations[blockIdx]
-        }
-        return exercise.name == "Rest" ? restDuration : exerciseDuration
+        timing.duration(at: currentIndex, in: routine)
     }
 
     private var averageHeartRate: Double {
@@ -245,21 +235,16 @@ struct WorkoutPlayerView: View {
                         // this exercise is reflected here instead of the un-overridden phase value.
                         if timerStyle == .pyramid && isPlaying {
                             let phase = currentPyramidPhase
-                            Text("Pyramid \(phase + 1) of \(WorkoutPlayerView.pyramidIntervals.count)  •  \(durationForCurrentPosition)s")
+                            Text("Pyramid \(phase + 1) of \(WorkoutTiming.pyramidIntervals.count)  •  \(durationForCurrentPosition)s")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
 
                         // Blocks progress indicator — same rationale as above: use the
                         // override-aware duration rather than the raw block config value.
-                        if timerStyle == .blocks && isPlaying, let config = blocksConfig {
-                            let workBefore = routine[0..<min(currentIndex, routine.count)].filter { $0.name != "Rest" }.count
-                            let exercisePos = isRest ? max(0, workBefore - 1) : workBefore
-                            let superSetSize = config.blockDurations.count * config.exercisesPerBlock
-                            let posInSuperSet = exercisePos % max(1, superSetSize)
-                            let blockIdx = min(posInSuperSet / max(1, config.exercisesPerBlock), config.blockDurations.count - 1)
-                            let setNum = exercisePos / max(1, superSetSize) + 1
-                            Text("Block \(blockIdx + 1) of \(config.blockDurations.count)  •  Set \(setNum)  •  \(durationForCurrentPosition)s")
+                        if timerStyle == .blocks && isPlaying,
+                           let position = timing.blockPosition(at: currentIndex, in: routine) {
+                            Text("Block \(position.blockIndex + 1) of \(position.blockCount)  •  Set \(position.setNumber)  •  \(durationForCurrentPosition)s")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

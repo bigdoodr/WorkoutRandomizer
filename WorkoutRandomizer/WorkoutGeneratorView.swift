@@ -252,6 +252,20 @@ struct WorkoutGeneratorView: View {
         let options = blocksAvailableTotalSets
         if !options.contains(blocksTotalSets) { blocksTotalSets = options.first ?? 1 }
     }
+
+    /// The one place timing rules live. Built fresh from current state so the Custom Timers
+    /// editor and the player always agree about how long a given slot runs.
+    var timing: WorkoutTiming {
+        WorkoutTiming(
+            style: timerStyle,
+            exerciseDuration: exerciseDuration,
+            restDuration: restDuration,
+            blocksConfig: timerStyle == .blocks
+                ? RepeatingBlocksConfig(exercisesPerBlock: exercisesPerBlock, blockDurations: blockDurations)
+                : nil,
+            overrides: exerciseDurationOverrides
+        )
+    }
     private func formatBlockTime(_ seconds: Int) -> String {
         let m = seconds / 60; let s = seconds % 60
         return s == 0 ? "\(m)m" : "\(m)m \(s)s"
@@ -816,13 +830,13 @@ struct WorkoutGeneratorView: View {
                                             Spacer()
                                             if showCustomTimers && exercise.name != "Rest" {
                                                 HStack(spacing: 4) {
-                                                    Text("\(exerciseDurationOverrides[index] ?? defaultDuration(forIndex: index, exercise: exercise))s")
+                                                    Text("\(timing.duration(at: index, in: generatedRoutine))s")
                                                         .font(.caption)
                                                         .foregroundStyle(.secondary)
                                                         .frame(minWidth: 32, alignment: .trailing)
                                                     Stepper(
                                                         value: Binding(
-                                                            get: { exerciseDurationOverrides[index] ?? defaultDuration(forIndex: index, exercise: exercise) },
+                                                            get: { timing.duration(at: index, in: generatedRoutine) },
                                                             set: { exerciseDurationOverrides[index] = $0 }
                                                         ),
                                                         in: 5...300, step: 5
@@ -831,13 +845,13 @@ struct WorkoutGeneratorView: View {
                                                 }
                                             } else if showCustomTimers && exercise.name == "Rest" {
                                                 HStack(spacing: 4) {
-                                                    Text("\(exerciseDurationOverrides[index] ?? defaultDuration(forIndex: index, exercise: exercise))s")
+                                                    Text("\(timing.duration(at: index, in: generatedRoutine))s")
                                                         .font(.caption)
                                                         .foregroundStyle(.blue)
                                                         .frame(minWidth: 32, alignment: .trailing)
                                                     Stepper(
                                                         value: Binding(
-                                                            get: { exerciseDurationOverrides[index] ?? defaultDuration(forIndex: index, exercise: exercise) },
+                                                            get: { timing.duration(at: index, in: generatedRoutine) },
                                                             set: { exerciseDurationOverrides[index] = $0 }
                                                         ),
                                                         in: 5...300, step: 5
@@ -1090,28 +1104,6 @@ struct WorkoutGeneratorView: View {
         })
     }
     
-    // Mirrors WorkoutPlayerView.durationForCurrentPosition's pyramid/blocks math so the
-    // Custom Timers editor shows the duration that will actually run before it's overridden,
-    // instead of always showing the flat Standard-style exerciseDuration/restDuration.
-    private func defaultDuration(forIndex index: Int, exercise: Exercise) -> Int {
-        let isRestSlot = exercise.name == "Rest"
-        if timerStyle == .pyramid {
-            let workBefore = generatedRoutine[0..<min(index, generatedRoutine.count)].filter { $0.name != "Rest" }.count
-            let phase = isRestSlot ? max(0, workBefore - 1) : workBefore
-            let interval = WorkoutPlayerView.pyramidIntervals[phase % WorkoutPlayerView.pyramidIntervals.count]
-            return isRestSlot ? interval.rest : interval.work
-        }
-        if timerStyle == .blocks {
-            let workBefore = generatedRoutine[0..<min(index, generatedRoutine.count)].filter { $0.name != "Rest" }.count
-            let exercisePos = isRestSlot ? max(0, workBefore - 1) : workBefore
-            let superSetSize = blockDurations.count * exercisesPerBlock
-            let posInSuperSet = exercisePos % max(1, superSetSize)
-            let blockIdx = min(posInSuperSet / max(1, exercisesPerBlock), blockDurations.count - 1)
-            return blockDurations[blockIdx]
-        }
-        return isRestSlot ? restDuration : exerciseDuration
-    }
-
     private func generateWorkout() {
         isGenerating = true
 
@@ -1161,12 +1153,12 @@ struct WorkoutGeneratorView: View {
             }
 
             // Compute target exercise count based on timer style
-            let pyramidCycleSecs = WorkoutPlayerView.pyramidIntervals.reduce(0) { $0 + $1.work + $1.rest }
+            let pyramidCycleSecs = WorkoutTiming.pyramidIntervals.reduce(0) { $0 + $1.work + $1.rest }
             let maxExercises: Int
             switch timerStyle {
             case .pyramid:
                 let cycles = max(1, Int(ceil(Double(totalDuration) * 60.0 / Double(pyramidCycleSecs))))
-                maxExercises = cycles * WorkoutPlayerView.pyramidIntervals.count
+                maxExercises = cycles * WorkoutTiming.pyramidIntervals.count
             case .blocks:
                 maxExercises = blocksTotalSets * blocksCount * exercisesPerBlock
             case .standard:
