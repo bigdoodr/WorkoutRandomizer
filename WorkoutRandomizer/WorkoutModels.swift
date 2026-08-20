@@ -32,7 +32,25 @@ enum TimerStyle: String, CaseIterable, Identifiable {
     case standard = "Standard"
     case pyramid = "Pyramid"
     case blocks = "Repeating Blocks"
+    /// Each round repeats the previous one and appends a new exercise: [A], [A B], [A B C]…
+    case addOn = "Add-On"
+    /// Builds up like Add-On, then peels an exercise off each round until only the first
+    /// exercise remains for the final round.
+    case addOnTakeAway = "Add-On + Take Away"
     var id: String { rawValue }
+
+    /// Ladder styles derive their own sequence rather than filling a flat list.
+    var isLadder: Bool { self == .addOn || self == .addOnTakeAway }
+
+    var shortLabel: String {
+        switch self {
+        case .standard: return "Standard"
+        case .pyramid: return "Pyramid"
+        case .blocks: return "Blocks"
+        case .addOn: return "Add-On"
+        case .addOnTakeAway: return "Add-On +/-"
+        }
+    }
 }
 
 struct RepeatingBlocksConfig: Equatable {

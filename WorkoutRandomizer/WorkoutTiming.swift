@@ -21,12 +21,81 @@ struct WorkoutTiming {
     /// Per-slot user overrides from the Custom Timers editor, keyed by routine index.
     var overrides: [Int: Int] = [:]
 
-    /// The Pyramid ladder: one work/rest pair per phase, repeating to fill the routine.
-    /// NOTE: rest currently equals work here, and the ladder is a fixed 480s (8 minute) cycle —
-    /// both are slated to change (duration-derived ladder, rest = work / 2).
-    static let pyramidIntervals: [(work: Int, rest: Int)] = [
-        (30, 30), (40, 40), (50, 50), (50, 50), (40, 40), (30, 30)
-    ]
+    // MARK: - Rest ratio
+
+    /// The one rule that turns a work duration into its rest: half the work, rounded down to a
+    /// 5-second boundary, never below 5s. Integer division does the rounding for free —
+    /// 45s → 20s, 30s → 15s, 20s → 10s, 60s → 30s.
+    ///
+    /// Standard lets you opt out of this via the Rest Duration chips. Pyramid and Blocks have no
+    /// manual rest input of their own, so they always derive rest from their work values.
+    static func restSeconds(forWork work: Int) -> Int {
+        max(5, (work / 2 / 5) * 5)
+    }
+
+    // MARK: - Pyramid ladder
+
+    static let pyramidFloor = 20
+    static let pyramidCeiling = 60
+    /// Fits whose running time is within this of the best are treated as equally accurate, so
+    /// shape can win the tie-break.
+    static let pyramidTieToleranceSeconds = 30
+
+    /// One symmetric pass: ramps floor → ceiling across the first half, then mirrors it.
+    /// Values snap to 5s, so longer passes naturally develop plateaus rather than 1s increments.
+    static func pyramidPass(steps: Int) -> [Int] {
+        let half = max(1, steps / 2)
+        var ascending: [Int] = []
+        for i in 0..<half {
+            let t = half == 1 ? 0.0 : Double(i) / Double(half - 1)
+            let raw = Double(pyramidFloor) + t * Double(pyramidCeiling - pyramidFloor)
+            ascending.append(Int((raw / 5.0).rounded()) * 5)
+        }
+        return ascending + ascending.reversed()
+    }
+
+    struct PyramidPlan {
+        let pass: [Int]
+        let repeats: Int
+        var ladder: [Int] { Array(repeating: pass, count: repeats).flatMap { $0 } }
+        var totalSeconds: Int { ladder.reduce(0) { $0 + $1 + WorkoutTiming.restSeconds(forWork: $1) } }
+    }
+
+    /// Choose a pyramid that fills the requested duration. Rather than repeating one fixed
+    /// 8-minute cycle regardless of what was asked for, this searches pass lengths and repeat
+    /// counts, then — among fits of comparable accuracy — prefers the longest single pass and
+    /// the fewest repeats, because one 20-step climb reads better than two 10-step climbs.
+    static func pyramidPlan(forTotalMinutes minutes: Int) -> PyramidPlan {
+        let target = max(60, minutes * 60)
+        var best: (error: Int, steps: Int, repeats: Int)?
+        var candidates: [(error: Int, steps: Int, repeats: Int)] = []
+
+        for steps in stride(from: 6, through: 24, by: 2) {
+            let passSeconds = pyramidPass(steps: steps).reduce(0) { $0 + $1 + restSeconds(forWork: $1) }
+            guard passSeconds > 0 else { continue }
+            for repeats in 1...12 {
+                let candidate = (error: abs(passSeconds * repeats - target), steps: steps, repeats: repeats)
+                candidates.append(candidate)
+                if best == nil || candidate.error < best!.error { best = candidate }
+            }
+        }
+
+        guard let bestError = best?.error else {
+            return PyramidPlan(pass: pyramidPass(steps: 10), repeats: 1)
+        }
+        let acceptable = candidates.filter { $0.error <= bestError + pyramidTieToleranceSeconds }
+        let choice = acceptable.max { a, b in (a.steps, -a.repeats) < (b.steps, -b.repeats) }
+            ?? (error: bestError, steps: 10, repeats: 1)
+        return PyramidPlan(pass: pyramidPass(steps: choice.steps), repeats: choice.repeats)
+    }
+
+    /// The work sequence this session will actually run, one entry per exercise slot.
+    var pyramidLadder: [Int] = WorkoutTiming.pyramidPass(steps: 10)
+
+    /// One work/rest pair per Pyramid phase.
+    var pyramidIntervals: [(work: Int, rest: Int)] {
+        pyramidLadder.map { (work: $0, rest: Self.restSeconds(forWork: $0)) }
+    }
 
     // MARK: - Position
 
@@ -45,8 +114,8 @@ struct WorkoutTiming {
 
     /// Zero-based Pyramid phase for the slot at `index`; always 0 for other timer styles.
     func pyramidPhase(at index: Int, in routine: [Exercise]) -> Int {
-        guard style == .pyramid else { return 0 }
-        return exercisePosition(at: index, in: routine) % Self.pyramidIntervals.count
+        guard style == .pyramid, !pyramidIntervals.isEmpty else { return 0 }
+        return exercisePosition(at: index, in: routine) % pyramidIntervals.count
     }
 
     struct BlockPosition {
@@ -83,18 +152,22 @@ struct WorkoutTiming {
 
         switch style {
         case .pyramid:
-            let interval = Self.pyramidIntervals[pyramidPhase(at: index, in: routine)]
+            guard !pyramidIntervals.isEmpty else { return isRest ? restDuration : exerciseDuration }
+            let interval = pyramidIntervals[pyramidPhase(at: index, in: routine)]
             return isRest ? interval.rest : interval.work
 
         case .blocks:
-            // Blocks has no separate rest value — work and rest share the block's duration.
             guard let config = blocksConfig,
                   let position = blockPosition(at: index, in: routine) else {
                 return isRest ? restDuration : exerciseDuration
             }
-            return config.blockDurations[position.blockIndex]
+            // Blocks configures work only; its rest is derived by the shared ratio rather than
+            // matching work 1:1 as it used to.
+            let work = config.blockDurations[position.blockIndex]
+            return isRest ? Self.restSeconds(forWork: work) : work
 
-        case .standard:
+        case .standard, .addOn, .addOnTakeAway:
+            // Ladder styles vary which exercises run, not how long they run for.
             return isRest ? restDuration : exerciseDuration
         }
     }

@@ -33,6 +33,10 @@ struct WorkoutPlayerView: View {
     let enableHaptics_iOS_vision: Bool
     let enableSound_macOS: Bool
     var durationOverrides: [Int: Int]? = nil
+    /// Routine indices where each ladder round begins. Non-nil only for Add-On styles.
+    var ladderRoundStarts: [Int]? = nil
+    /// The Pyramid work sequence this routine was generated against.
+    var pyramidLadder: [Int]? = nil
 
     /// All timing rules live in WorkoutTiming so the player and the generator's Custom Timers
     /// editor can never disagree about how long a slot runs.
@@ -42,7 +46,8 @@ struct WorkoutPlayerView: View {
             exerciseDuration: exerciseDuration,
             restDuration: restDuration,
             blocksConfig: blocksConfig,
-            overrides: durationOverrides ?? [:]
+            overrides: durationOverrides ?? [:],
+            pyramidLadder: pyramidLadder ?? WorkoutTiming.pyramidPass(steps: 10)
         )
     }
 
@@ -109,6 +114,13 @@ struct WorkoutPlayerView: View {
         } else {
             return nextExercise.name
         }
+    }
+
+    /// Which ladder round the current slot falls in, one-based, plus the total round count.
+    private var currentLadderRound: (round: Int, total: Int)? {
+        guard let starts = ladderRoundStarts, !starts.isEmpty else { return nil }
+        let round = starts.lastIndex(where: { $0 <= currentIndex }).map { $0 + 1 } ?? 1
+        return (round: round, total: starts.count)
     }
 
     private var currentPyramidPhase: Int {
@@ -235,7 +247,7 @@ struct WorkoutPlayerView: View {
                         // this exercise is reflected here instead of the un-overridden phase value.
                         if timerStyle == .pyramid && isPlaying {
                             let phase = currentPyramidPhase
-                            Text("Pyramid \(phase + 1) of \(WorkoutTiming.pyramidIntervals.count)  •  \(durationForCurrentPosition)s")
+                            Text("Pyramid \(phase + 1) of \(timing.pyramidIntervals.count)  •  \(durationForCurrentPosition)s")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -245,6 +257,14 @@ struct WorkoutPlayerView: View {
                         if timerStyle == .blocks && isPlaying,
                            let position = timing.blockPosition(at: currentIndex, in: routine) {
                             Text("Block \(position.blockIndex + 1) of \(position.blockCount)  •  Set \(position.setNumber)  •  \(durationForCurrentPosition)s")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        // Ladder progress — without this you cannot tell how far up (or back
+                        // down) the ladder you are, since the exercises simply repeat.
+                        if timerStyle.isLadder && isPlaying, let ladder = currentLadderRound {
+                            Text("Round \(ladder.round) of \(ladder.total)  •  \(durationForCurrentPosition)s")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

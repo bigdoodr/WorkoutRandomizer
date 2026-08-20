@@ -25,7 +25,10 @@ struct WorkoutGeneratorView: View {
     @State private var selectedDifficulties: Set<String> = ["Beginner", "Medium", "Hard", "Expert/Advanced"]
     @State private var totalDuration = 10
     @State private var exerciseDuration = 20
+    /// The manually-chosen rest, used only when the link to exercise duration is off.
     @State private var restDuration = 10
+    /// When on, rest is derived from exercise duration instead of set by hand.
+    @AppStorage("restLinkedToWork") private var restLinkedToWork = true
     @State private var restEvery = 1
     @State private var generatedRoutine: [Exercise] = []
     @State private var showingWorkout = false
@@ -51,6 +54,8 @@ struct WorkoutGeneratorView: View {
     @State private var showCustomTimers = false
     @State private var exerciseDurationOverrides: [Int: Int] = [:]
     @State private var showSaveConfirmation = false
+    /// Routine indices where each ladder round begins; empty for non-ladder styles.
+    @State private var ladderRoundStarts: [Int] = []
 
     @StateObject private var videoManager = VideoManager.shared
     @State private var catalog = ExerciseCatalog.shared
@@ -235,8 +240,20 @@ struct WorkoutGeneratorView: View {
     @State private var blocksTotalSets: Int = 2
     @State private var shuffleBlockSets: Bool = false
 
+    /// Work + derived rest for one pass through every block.
     var blocksSuperSetSeconds: Int {
-        blockDurations.reduce(0) { $0 + exercisesPerBlock * $1 * 2 }
+        blockDurations.reduce(0) { total, work in
+            total + exercisesPerBlock * (work + WorkoutTiming.restSeconds(forWork: work))
+        }
+    }
+    /// The routine has no trailing rest after its final exercise, so the honest total is one
+    /// rest shorter than the raw cycle arithmetic suggests.
+    private var blocksTrailingRestSeconds: Int {
+        guard let lastWork = blockDurations.last else { return 0 }
+        return WorkoutTiming.restSeconds(forWork: lastWork)
+    }
+    func blocksTotalSeconds(forSets sets: Int) -> Int {
+        max(0, sets * blocksSuperSetSeconds - blocksTrailingRestSeconds)
     }
     var blocksAvailableTotalSets: [Int] {
         let superSetSec = blocksSuperSetSeconds
@@ -246,7 +263,14 @@ struct WorkoutGeneratorView: View {
         while n * superSetSec <= 90 * 60 { options.append(n); n += 1 }
         return options.isEmpty ? [1] : options
     }
-    var blocksTotalSeconds: Int { blocksTotalSets * blocksSuperSetSeconds }
+    var blocksTotalSeconds: Int { blocksTotalSeconds(forSets: blocksTotalSets) }
+
+    /// The rest that Standard routines actually use: derived from exercise duration while the
+    /// link is on, the hand-picked value otherwise. Everything downstream — the timing resolver,
+    /// the player, export, the routine-length estimate — must read this, never `restDuration`.
+    var effectiveRestDuration: Int {
+        restLinkedToWork ? WorkoutTiming.restSeconds(forWork: exerciseDuration) : restDuration
+    }
 
     private func clampBlocksTotalSets() {
         let options = blocksAvailableTotalSets
@@ -259,12 +283,47 @@ struct WorkoutGeneratorView: View {
         WorkoutTiming(
             style: timerStyle,
             exerciseDuration: exerciseDuration,
-            restDuration: restDuration,
+            restDuration: effectiveRestDuration,
             blocksConfig: timerStyle == .blocks
                 ? RepeatingBlocksConfig(exercisesPerBlock: exercisesPerBlock, blockDurations: blockDurations)
                 : nil,
-            overrides: exerciseDurationOverrides
+            overrides: exerciseDurationOverrides,
+            pyramidLadder: pyramidPlan.ladder
         )
+    }
+
+    /// The pyramid sized for the currently-selected total duration.
+    var pyramidPlan: WorkoutTiming.PyramidPlan {
+        WorkoutTiming.pyramidPlan(forTotalMinutes: totalDuration)
+    }
+
+    /// Describes the pyramid that will actually run. Generated from the plan rather than
+    /// hardcoded, so it can never drift out of step with the timer.
+    ///
+    /// The work values render as one wrapping sequence rather than a bullet per step: a 24-step
+    /// pass listed line-by-line filled the entire screen and pushed Total Duration out of view.
+    @ViewBuilder
+    private var pyramidExplainer: some View {
+        let plan = pyramidPlan
+        let repeatNote = plan.repeats == 1 ? "" : ", repeated \(plan.repeats)×"
+        let headline = "A \(plan.pass.count)-step climb\(repeatNote), sized to your \(totalDuration) minute total. Rest is always half the work."
+        let sequence = plan.pass.map { "\($0)s" }.joined(separator: " · ")
+        VStack(alignment: .leading, spacing: 6) {
+            Text(headline)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(sequence)
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Peaks at \(plan.pass.max() ?? 0)s work + \(WorkoutTiming.restSeconds(forWork: plan.pass.max() ?? 0))s rest  •  Total \(formatBlockTime(plan.totalSeconds))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(.gray.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
     private func formatBlockTime(_ seconds: Int) -> String {
         let m = seconds / 60; let s = seconds % 60
@@ -433,39 +492,61 @@ struct WorkoutGeneratorView: View {
                                 .font(.title2)
                                 .fontWeight(.semibold)
 
-                            HStack(spacing: 15) {
-                                ForEach(useAdvancedView ? TimerStyle.allCases : [TimerStyle.standard]) { style in
-                                    HStack {
-                                        Image(systemName: timerStyle == style ? "circle.fill" : "circle")
-                                            .foregroundStyle(timerStyle == style ? .blue : .secondary)
-                                        Text(style.rawValue)
-                                            .font(.subheadline)
+                            // Capsule chips in a scroller rather than a fixed HStack — five
+                            // styles will not fit across an iPhone at any sensible font size.
+                            ZStack(alignment: .trailing) {
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        ForEach(TimerStyle.allCases) { style in
+                                            Button { timerStyle = style } label: {
+                                                Text(style.rawValue)
+                                                    .font(.subheadline)
+                                                    .lineLimit(1)
+                                                    .padding(.horizontal, 14)
+                                                    .padding(.vertical, 8)
+                                                    .background(timerStyle == style ? Color.blue : Color.gray.opacity(0.12))
+                                                    .foregroundStyle(timerStyle == style ? .white : .primary)
+                                                    .clipShape(Capsule())
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
                                     }
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { timerStyle = style }
+                                    .padding(.vertical, 2)
+                                    .padding(.trailing, 24)
                                 }
+                                LinearGradient(
+                                    colors: [.clear, Color(platformBackgroundColor)],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                                .frame(width: 36)
+                                .allowsHitTesting(false)
                             }
 
-                            if timerStyle == .pyramid && useAdvancedView {
+                            if timerStyle.isLadder {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Pyramid cycle repeats to fill total duration — each round shares work & rest:")
+                                    Text(timerStyle == .addOn
+                                         ? "Each round repeats the last one and adds an exercise — round 1 is one exercise, round 2 is that exercise plus a new one, and so on."
+                                         : "Rounds build up one exercise at a time, then peel back off until the final round is just the first exercise again.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    ForEach(["30s work + 30s rest", "40s work + 40s rest", "50s work + 50s rest",
-                                             "50s work + 50s rest", "40s work + 40s rest", "30s work + 30s rest"], id: \.self) { label in
-                                        Text("• \(label)")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
+                                    Text("Ladder length is chosen to land closest to your selected total duration.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                                 .padding(10)
                                 .background(.gray.opacity(0.1))
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
+
+                            if timerStyle == .pyramid {
+                                pyramidExplainer
+                            }
                         }
 
                         // Durations — preset chips
-                        if timerStyle == .standard || timerStyle == .pyramid {
+                        // Everything except Blocks picks its total duration here; Blocks derives
+                        // its own from the cycle picker.
+                        if timerStyle != .blocks {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Durations")
                                     .font(.title2)
@@ -495,7 +576,7 @@ struct WorkoutGeneratorView: View {
                                         }
                                     }
 
-                                    if timerStyle == .standard {
+                                    if timerStyle != .pyramid {
                                         // Exercise Duration presets
                                         VStack(alignment: .leading, spacing: 8) {
                                             Text("Exercise Duration")
@@ -517,28 +598,72 @@ struct WorkoutGeneratorView: View {
                                             }
                                         }
 
-                                        // Rest Duration presets
+                                        // Rest Duration — either derived from Exercise Duration
+                                        // or picked by hand, toggled by the link button.
                                         VStack(alignment: .leading, spacing: 8) {
-                                            Text("Rest Duration")
-                                                .font(.subheadline)
-                                            HStack(spacing: 8) {
-                                                ForEach([10, 15, 30, 60], id: \.self) { preset in
-                                                    Button { restDuration = preset } label: {
-                                                        Text("\(preset)s")
-                                                            .font(.subheadline)
-                                                            .padding(.horizontal, 16)
-                                                            .padding(.vertical, 8)
-                                                            .background(restDuration == preset ? Color.blue : Color.gray.opacity(0.12))
-                                                            .foregroundStyle(restDuration == preset ? .white : .primary)
-                                                            .clipShape(Capsule())
-                                                    }
-                                                    .buttonStyle(.plain)
-                                                }
+                                            HStack {
+                                                Text("Rest Duration")
+                                                    .font(.subheadline)
                                                 Spacer()
+                                                Button {
+                                                    // Leaving linked mode seeds the manual value
+                                                    // with what was showing, so nothing jumps.
+                                                    if restLinkedToWork { restDuration = effectiveRestDuration }
+                                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                                        restLinkedToWork.toggle()
+                                                    }
+                                                } label: {
+                                                    HStack(spacing: 4) {
+                                                        Image(systemName: restLinkedToWork ? "link" : "link.badge.plus")
+                                                        Text(restLinkedToWork ? "Linked" : "Manual")
+                                                    }
+                                                    .font(.caption)
+                                                    .padding(.horizontal, 10)
+                                                    .padding(.vertical, 5)
+                                                    .background(restLinkedToWork ? Color.blue : Color.gray.opacity(0.15))
+                                                    .foregroundStyle(restLinkedToWork ? .white : .primary)
+                                                    .clipShape(Capsule())
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+
+                                            if restLinkedToWork {
+                                                HStack(spacing: 8) {
+                                                    Text("\(effectiveRestDuration)s")
+                                                        .font(.subheadline)
+                                                        .fontWeight(.medium)
+                                                        .padding(.horizontal, 16)
+                                                        .padding(.vertical, 8)
+                                                        .background(Color.blue.opacity(0.15))
+                                                        .foregroundStyle(.primary)
+                                                        .clipShape(Capsule())
+                                                    Text("half of \(exerciseDuration)s work")
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                    Spacer()
+                                                }
+                                            } else {
+                                                HStack(spacing: 8) {
+                                                    ForEach([10, 15, 30, 60], id: \.self) { preset in
+                                                        Button { restDuration = preset } label: {
+                                                            Text("\(preset)s")
+                                                                .font(.subheadline)
+                                                                .padding(.horizontal, 16)
+                                                                .padding(.vertical, 8)
+                                                                .background(restDuration == preset ? Color.blue : Color.gray.opacity(0.12))
+                                                                .foregroundStyle(restDuration == preset ? .white : .primary)
+                                                                .clipShape(Capsule())
+                                                        }
+                                                        .buttonStyle(.plain)
+                                                    }
+                                                    Spacer()
+                                                }
                                             }
                                         }
 
-                                        // Rest Frequency — exercises per circuit before rest
+                                        // Rest Frequency — Standard only. Ladder styles always
+                                        // rest after every exercise.
+                                        if timerStyle == .standard {
                                         VStack(alignment: .leading, spacing: 8) {
                                             HStack {
                                                 Text("Rest Frequency")
@@ -567,15 +692,15 @@ struct WorkoutGeneratorView: View {
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         }
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        // Advanced only: Repeating Blocks config, Feedback, Video Options
-                        if useAdvancedView {
-
-                        // Repeating Blocks Configuration
+                        // Block Configuration follows the Timer Style picker out of Advanced:
+                        // it is the only place a Blocks routine's work durations and cycle count
+                        // can be set, so hiding it would leave the style unconfigurable.
                         if timerStyle == .blocks {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Block Configuration")
@@ -626,7 +751,7 @@ struct WorkoutGeneratorView: View {
 
                                     // Per-block work durations
                                     VStack(alignment: .leading, spacing: 6) {
-                                        Text("Work Duration per Block (rest = same)")
+                                        Text("Work Duration per Block (rest = half)")
                                             .font(.subheadline)
                                         let durationPresets = [20, 25, 30, 35, 40, 45, 50, 60]
                                         ForEach(0..<blocksCount, id: \.self) { i in
@@ -665,7 +790,7 @@ struct WorkoutGeneratorView: View {
                                         }
                                         Picker("Total Workout", selection: $blocksTotalSets) {
                                             ForEach(blocksAvailableTotalSets, id: \.self) { n in
-                                                Text("\(n)× cycle · \(formatBlockTime(n * blocksSuperSetSeconds))")
+                                                Text("\(n)× cycle · \(formatBlockTime(blocksTotalSeconds(forSets: n)))")
                                                     .tag(n)
                                             }
                                         }
@@ -690,6 +815,9 @@ struct WorkoutGeneratorView: View {
                                 }
                             }
                         }
+
+                        // Advanced only: Feedback, Video Options
+                        if useAdvancedView {
 
                         // Feedback Settings
                         VStack(alignment: .leading, spacing: 12) {
@@ -958,16 +1086,11 @@ struct WorkoutGeneratorView: View {
 #endif
             }
         }
-        .onChange(of: useAdvancedView) { _, newValue in
-            if !newValue && timerStyle != .standard {
-                timerStyle = .standard
-            }
-        }
         .sheet(isPresented: $showingWorkout) {
             WorkoutPlayerView(
                 routine: generatedRoutine,
                 exerciseDuration: exerciseDuration,
-                restDuration: restDuration,
+                restDuration: effectiveRestDuration,
                 restEvery: restEvery,
                 timerStyle: timerStyle,
                 intention: selectedIntention,
@@ -976,7 +1099,9 @@ struct WorkoutGeneratorView: View {
                 enableSound_iOS_tv_vision: enableSound_iOS_tv_vision,
                 enableHaptics_iOS_vision: enableHaptics_iOS_vision,
                 enableSound_macOS: enableSound_macOS,
-                durationOverrides: exerciseDurationOverrides.isEmpty ? nil : exerciseDurationOverrides
+                durationOverrides: exerciseDurationOverrides.isEmpty ? nil : exerciseDurationOverrides,
+                ladderRoundStarts: ladderRoundStarts.isEmpty ? nil : ladderRoundStarts,
+                pyramidLadder: pyramidPlan.ladder
             )
             // A stray scroll/swipe shouldn't be able to abruptly end an active routine —
             // stopping now requires the confirmed Stop button inside the player.
@@ -1152,19 +1277,55 @@ struct WorkoutGeneratorView: View {
                 return
             }
 
+            // Ladder styles build their own round structure from distinct rungs, so they skip
+            // the flat maxExercises/createBalancedRoutine path entirely.
+            if timerStyle.isLadder {
+                let takeAway = timerStyle == .addOnTakeAway
+                // A ladder beyond ~10 rungs is impractical to remember, let alone perform.
+                let units = ladderUnits(from: pool, maxUnits: 10)
+                guard !units.isEmpty else {
+                    isGenerating = false
+                    return
+                }
+                let rungs = bestLadderRungs(units: units, takeAway: takeAway)
+
+                var routine: [Exercise] = []
+                var roundStarts: [Int] = []
+                for size in ladderRoundSizes(rungs: rungs, takeAway: takeAway) {
+                    roundStarts.append(routine.count)
+                    for unit in units[0..<size] {
+                        for exercise in unit {
+                            routine.append(exercise)
+                            routine.append(Exercise(name: "Rest", videoPath: nil, equipment: ["None"]))
+                        }
+                    }
+                }
+                // No trailing rest after the final exercise of the routine.
+                if routine.last?.name == "Rest" { routine.removeLast() }
+
+                generatedRoutine = routine
+                ladderRoundStarts = roundStarts
+                exerciseDurationOverrides.removeAll()
+                showCustomTimers = false
+                isGenerating = false
+                scrollToGeneratedToken = UUID()
+                return
+            }
+
             // Compute target exercise count based on timer style
-            let pyramidCycleSecs = WorkoutTiming.pyramidIntervals.reduce(0) { $0 + $1.work + $1.rest }
             let maxExercises: Int
             switch timerStyle {
             case .pyramid:
-                let cycles = max(1, Int(ceil(Double(totalDuration) * 60.0 / Double(pyramidCycleSecs))))
-                maxExercises = cycles * WorkoutTiming.pyramidIntervals.count
+                // One exercise per rung of the duration-derived ladder.
+                maxExercises = pyramidPlan.ladder.count
             case .blocks:
                 maxExercises = blocksTotalSets * blocksCount * exercisesPerBlock
             case .standard:
-                let fullCycle = Double(exerciseDuration) + (Double(restDuration) / Double(restEvery))
+                let fullCycle = Double(exerciseDuration) + (Double(effectiveRestDuration) / Double(restEvery))
                 let totalSecs = Double(totalDuration) * 60
                 maxExercises = Int(ceil(totalSecs / fullCycle))
+            case .addOn, .addOnTakeAway:
+                maxExercises = 0   // unreachable: ladder styles return before this point
             }
 
             // Create balanced routine
@@ -1213,6 +1374,7 @@ struct WorkoutGeneratorView: View {
             }
 
             generatedRoutine = routine
+            ladderRoundStarts = []
             exerciseDurationOverrides.removeAll()
             showCustomTimers = false
             isGenerating = false
@@ -1248,6 +1410,59 @@ struct WorkoutGeneratorView: View {
             }
         }
         return units
+    }
+
+    // MARK: - Ladder styles (Add-On / Add-On + Take Away)
+
+    /// Distinct exercises to build a ladder from. Each rung is expanded into its Left/Right pair
+    /// where needed and kept together, so a single-sided rung costs two slots rather than one.
+    private func ladderUnits(from pool: [Exercise], maxUnits: Int) -> [[Exercise]] {
+        var units: [[Exercise]] = []
+        var seen = Set<String>()
+        for exercise in pool.shuffled() {
+            guard units.count < maxUnits else { break }
+            guard !seen.contains(exercise.name) else { continue }
+            seen.insert(exercise.name)
+            units.append(expandSides(exercise))
+        }
+        return units
+    }
+
+    /// The round pattern for a ladder: 1…rungs ascending, then rungs-1…1 back down when the
+    /// take-away variant is selected.
+    private func ladderRoundSizes(rungs: Int, takeAway: Bool) -> [Int] {
+        guard rungs > 0 else { return [] }
+        var sizes = Array(1...rungs)
+        if takeAway, rungs > 1 { sizes += Array((1..<rungs).reversed()) }
+        return sizes
+    }
+
+    /// Total exercise slots a ladder of this size would run, counting single-sided rungs twice.
+    private func ladderSlotCount(units: [[Exercise]], rungs: Int, takeAway: Bool) -> Int {
+        ladderRoundSizes(rungs: rungs, takeAway: takeAway).reduce(0) { total, size in
+            total + units[0..<size].reduce(0) { $0 + $1.count }
+        }
+    }
+
+    /// Pick the ladder size whose running time lands closest to the requested total. Closest
+    /// rather than largest-that-fits: asking for 10 minutes and getting 7:30 is a worse answer
+    /// than getting 11:15.
+    private func bestLadderRungs(units: [[Exercise]], takeAway: Bool) -> Int {
+        guard !units.isEmpty else { return 0 }
+        let target = totalDuration * 60
+        let slotCost = exerciseDuration + effectiveRestDuration
+        var best = 1
+        var bestDelta = Int.max
+        for rungs in 1...units.count {
+            let slots = ladderSlotCount(units: units, rungs: rungs, takeAway: takeAway)
+            let seconds = max(0, slots * slotCost - effectiveRestDuration)
+            let delta = abs(seconds - target)
+            if delta < bestDelta {
+                bestDelta = delta
+                best = rungs
+            }
+        }
+        return best
     }
 
     private func createBalancedRoutine(from pool: [Exercise], maxCount: Int) -> [Exercise] {
@@ -1293,7 +1508,7 @@ struct WorkoutGeneratorView: View {
                 guard !isRest else { return 0 }
                 let next = index + 1
                 guard next < generatedRoutine.count,
-                      generatedRoutine[next].name == "Rest" else { return restDuration }
+                      generatedRoutine[next].name == "Rest" else { return effectiveRestDuration }
                 return timing.duration(at: next, in: generatedRoutine)
             }()
             return ExportableExercise(
@@ -1378,7 +1593,9 @@ struct WorkoutGeneratorView: View {
             if !didSetDurations && exportableExercise.isTimeBased && exportableExercise.name != "Rest" {
                 exerciseDuration = exportableExercise.exerciseDuration
                 if exportableExercise.restDuration > 0 {
+                    // The file specifies its own rest; honour it rather than re-deriving.
                     restDuration = exportableExercise.restDuration
+                    restLinkedToWork = false
                 }
                 didSetDurations = true
             }
