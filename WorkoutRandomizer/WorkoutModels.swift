@@ -26,6 +26,9 @@ struct Exercise {
     let equipment: [String]
     var singleSided: Bool = false
     var isMovement: Bool = false
+    /// Workout focus areas this exercise is relevant to beyond its own category. Only
+    /// populated for warm-up and cool-down stretches; empty means "suits any focus".
+    var relatedFocusAreas: [String] = []
 }
 
 enum TimerStyle: String, CaseIterable, Identifiable {

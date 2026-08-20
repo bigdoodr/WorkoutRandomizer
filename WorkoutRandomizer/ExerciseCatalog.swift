@@ -14,6 +14,9 @@ struct CatalogExercise: Codable, Equatable {
     let singleSided: Bool?
     let isMovement: Bool?
     let additionalCategories: [String]?
+    /// Which workout focus areas this stretch actually addresses, used to match warm-ups and
+    /// cool-downs to the routine. Absent means "suits any focus" and acts as a fallback.
+    let relatedFocusAreas: [String]?
 }
 
 struct CatalogData: Codable, Equatable {
@@ -44,7 +47,7 @@ final class ExerciseCatalog {
     var exercises: [String: [String: [Exercise]]] {
         data.exercises.mapValues { difficultyDict in
             difficultyDict.mapValues { catalogExercises in
-                catalogExercises.map { Exercise(name: $0.name, videoPath: $0.videoPath, equipment: $0.equipment ?? ["None"], singleSided: $0.singleSided ?? false, isMovement: $0.isMovement ?? false) }
+                catalogExercises.map { Exercise(name: $0.name, videoPath: $0.videoPath, equipment: $0.equipment ?? ["None"], singleSided: $0.singleSided ?? false, isMovement: $0.isMovement ?? false, relatedFocusAreas: $0.relatedFocusAreas ?? []) }
             }
         }
     }
@@ -56,7 +59,7 @@ final class ExerciseCatalog {
             for (_, catalogExercises) in difficultyDict {
                 for ce in catalogExercises {
                     guard let additional = ce.additionalCategories else { continue }
-                    let ex = Exercise(name: ce.name, videoPath: ce.videoPath, equipment: ce.equipment ?? ["None"], singleSided: ce.singleSided ?? false, isMovement: ce.isMovement ?? false)
+                    let ex = Exercise(name: ce.name, videoPath: ce.videoPath, equipment: ce.equipment ?? ["None"], singleSided: ce.singleSided ?? false, isMovement: ce.isMovement ?? false, relatedFocusAreas: ce.relatedFocusAreas ?? [])
                     for category in additional {
                         result[category, default: []].append(ex)
                     }
@@ -74,7 +77,7 @@ final class ExerciseCatalog {
             for (level, catalogExercises) in difficultyDict {
                 for ce in catalogExercises {
                     guard let additional = ce.additionalCategories else { continue }
-                    let ex = Exercise(name: ce.name, videoPath: ce.videoPath, equipment: ce.equipment ?? ["None"], singleSided: ce.singleSided ?? false, isMovement: ce.isMovement ?? false)
+                    let ex = Exercise(name: ce.name, videoPath: ce.videoPath, equipment: ce.equipment ?? ["None"], singleSided: ce.singleSided ?? false, isMovement: ce.isMovement ?? false, relatedFocusAreas: ce.relatedFocusAreas ?? [])
                     for category in additional {
                         result[category, default: [:]][level, default: []].append(ex)
                     }
@@ -141,7 +144,8 @@ final class ExerciseCatalog {
 
     /// The remote catalog may lag behind the app bundle and omit newer per-exercise
     /// metadata. Fill in any missing values from the bundled catalog, matched by
-    /// exercise name, so features like "Both Sides" and "Move/Hold" keep working
+    /// exercise name, so features like "Both Sides", "Move/Hold" and focus-matched
+    /// warm-ups keep working
     /// regardless of which catalog source is active.
     private static func backfillMetadata(_ incoming: CatalogData) -> CatalogData {
         let bundled = loadBundled()
@@ -149,12 +153,14 @@ final class ExerciseCatalog {
         var bundledSingleSided: [String: Bool] = [:]
         var bundledIsMovement: [String: Bool] = [:]
         var bundledAdditionalCategories: [String: [String]] = [:]
+        var bundledRelatedFocusAreas: [String: [String]] = [:]
         for (_, difficultyDict) in bundled.exercises {
             for (_, exerciseList) in difficultyDict {
                 for exercise in exerciseList {
                     if let flag = exercise.singleSided { bundledSingleSided[exercise.name] = flag }
                     if let flag = exercise.isMovement { bundledIsMovement[exercise.name] = flag }
                     if let cats = exercise.additionalCategories { bundledAdditionalCategories[exercise.name] = cats }
+                    if let areas = exercise.relatedFocusAreas { bundledRelatedFocusAreas[exercise.name] = areas }
                 }
             }
         }
@@ -168,7 +174,8 @@ final class ExerciseCatalog {
                         equipment: exercise.equipment,
                         singleSided: exercise.singleSided ?? bundledSingleSided[exercise.name],
                         isMovement: exercise.isMovement ?? bundledIsMovement[exercise.name],
-                        additionalCategories: exercise.additionalCategories ?? bundledAdditionalCategories[exercise.name]
+                        additionalCategories: exercise.additionalCategories ?? bundledAdditionalCategories[exercise.name],
+                        relatedFocusAreas: exercise.relatedFocusAreas ?? bundledRelatedFocusAreas[exercise.name]
                     )
                 }
             }

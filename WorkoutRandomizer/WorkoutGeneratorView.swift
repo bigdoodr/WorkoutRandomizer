@@ -1387,8 +1387,8 @@ struct WorkoutGeneratorView: View {
     // (only a rest, never another exercise, can end up between them).
     private func expandSides(_ exercise: Exercise) -> [Exercise] {
         guard exercise.singleSided else { return [exercise] }
-        let left  = Exercise(name: "\(exercise.name) (Left)",  videoPath: exercise.videoPath, equipment: exercise.equipment, isMovement: exercise.isMovement)
-        let right = Exercise(name: "\(exercise.name) (Right)", videoPath: exercise.videoPath, equipment: exercise.equipment, isMovement: exercise.isMovement)
+        let left  = Exercise(name: "\(exercise.name) (Left)",  videoPath: exercise.videoPath, equipment: exercise.equipment, isMovement: exercise.isMovement, relatedFocusAreas: exercise.relatedFocusAreas)
+        let right = Exercise(name: "\(exercise.name) (Right)", videoPath: exercise.videoPath, equipment: exercise.equipment, isMovement: exercise.isMovement, relatedFocusAreas: exercise.relatedFocusAreas)
         return [left, right]
     }
 
