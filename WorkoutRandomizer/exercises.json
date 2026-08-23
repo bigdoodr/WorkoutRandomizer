@@ -555,6 +555,7 @@
           "equipment": [
             "None"
           ],
+          "isMovement": true,
           "additionalCategories": [
             "Warm-Up: Full Body"
           ],
@@ -625,7 +626,7 @@
           "equipment": [
             "None"
           ],
-          "isMovement": true
+          "isMovement": false
         },
         {
           "name": "Cross-Body Shoulder Stretch",
@@ -633,7 +634,7 @@
           "equipment": [
             "None"
           ],
-          "isMovement": true
+          "isMovement": false
         },
         {
           "name": "Squat Fold",
@@ -765,7 +766,7 @@
             "None"
           ],
           "singleSided": true,
-          "isMovement": true,
+          "isMovement": false,
           "additionalCategories": [
             "Cool Down",
             "Warm-Up: Hips"
@@ -882,7 +883,7 @@
           "equipment": [
             "None"
           ],
-          "isMovement": true,
+          "isMovement": false,
           "relatedFocusAreas": [
             "Legs",
             "Legs: Strength",
@@ -895,7 +896,7 @@
           "equipment": [
             "None"
           ],
-          "isMovement": true,
+          "isMovement": false,
           "relatedFocusAreas": [
             "Legs",
             "Legs: Strength",
@@ -938,7 +939,7 @@
           "equipment": [
             "None"
           ],
-          "isMovement": true,
+          "isMovement": false,
           "relatedFocusAreas": [
             "Chest",
             "Shoulders"
@@ -950,7 +951,7 @@
           "equipment": [
             "None"
           ],
-          "isMovement": true,
+          "isMovement": false,
           "relatedFocusAreas": [
             "Triceps",
             "Shoulders"
@@ -962,7 +963,7 @@
           "equipment": [
             "None"
           ],
-          "isMovement": true,
+          "isMovement": false,
           "relatedFocusAreas": [
             "Chest",
             "Triceps",
@@ -976,7 +977,7 @@
           "equipment": [
             "None"
           ],
-          "isMovement": true,
+          "isMovement": false,
           "additionalCategories": [
             "Evening Recovery"
           ]
