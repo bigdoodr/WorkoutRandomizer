@@ -90,7 +90,7 @@ struct WorkoutGeneratorApp: App {
     
     var body: some Scene {
         WindowGroup {
-            WorkoutGeneratorView()
+            RootTabView()
         }
     }
 }

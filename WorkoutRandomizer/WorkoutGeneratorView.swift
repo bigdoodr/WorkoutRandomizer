@@ -349,59 +349,6 @@ struct WorkoutGeneratorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         
-                        // View Exercises / My Exercises
-                        HStack(spacing: 10) {
-                            NavigationLink(destination: ExercisesView(exercisesByArea: exercises)) {
-                                HStack {
-                                    Image(systemName: "list.bullet.rectangle.portrait")
-                                    Text("All Exercises")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(.purple)
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                            NavigationLink(destination: MyExercisesView(
-                                focusAreas: focusAreas,
-                                difficulties: difficulties
-                            )) {
-                                HStack {
-                                    Image(systemName: "person.badge.plus")
-                                    Text("My Exercises")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(.indigo)
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                        }
-
-                        HStack(spacing: 10) {
-                            NavigationLink(destination: StretchRoutineView()) {
-                                HStack {
-                                    Image(systemName: "figure.cooldown")
-                                    Text("Stretch Routine")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(.teal)
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                            NavigationLink(destination: SavedRoutinesView()) {
-                                HStack {
-                                    Image(systemName: "folder.fill")
-                                    Text("Saved Routines")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(.brown)
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                        }
                         
                         // Basic/Advanced mode label
                         if !useAdvancedView {
