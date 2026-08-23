@@ -43,6 +43,14 @@ final class VideoManager: ObservableObject {
         return result
     }
 
+    /// Every exercise the catalog has a video for — stretches included. Both the first-launch
+    /// prompt and the Settings screen want exactly this, so it lives here rather than being
+    /// reassembled at each call site.
+    @MainActor
+    func downloadAllKnownVideos(progress: @escaping (Int, Int) -> Void, completion: @escaping () -> Void) {
+        downloadAll(keys: Array(videoPaths.keys), progress: progress, completion: completion)
+    }
+
     // Convenience for bulk download by keys
     @MainActor
     func downloadAll(keys: [String], progress: @escaping (Int, Int) -> Void, completion: @escaping () -> Void) {

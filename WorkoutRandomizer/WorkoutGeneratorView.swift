@@ -39,17 +39,18 @@ struct WorkoutGeneratorView: View {
     @State private var showingImporter = false
     @State private var exportDocument: WorkoutDocument?
     
-    // Feedback settings
-    @State private var enableSound_iOS_tv_vision = true
-    @State private var enableHaptics_iOS_vision = true
-    @State private var enableSound_macOS = true
+    // Feedback settings — @AppStorage, not @State, so they survive a launch. Same keys as
+    // SettingsView, which is how a change made there reaches the player.
+    @AppStorage("enableSound_iOS_tv_vision") private var enableSound_iOS_tv_vision = true
+    @AppStorage("enableHaptics_iOS_vision") private var enableHaptics_iOS_vision = true
+    @AppStorage("enableSound_macOS") private var enableSound_macOS = true
     
     @State private var selectedEquipment: Set<String> = ["None"]
     @State private var timerStyle: TimerStyle = .standard
     @State private var selectedIntention: WorkoutIntention = .generalFitness
     @AppStorage("hasSeenTutorial") private var hasSeenTutorial = false
-    @AppStorage("useAdvancedView") private var useAdvancedView = false
     @State private var showingTutorial = false
+    @State private var showingSettings = false
     @State private var customExerciseStore = CustomExerciseStore.shared
     @State private var showCustomTimers = false
     @State private var exerciseDurationOverrides: [Int: Int] = [:]
@@ -316,18 +317,6 @@ struct WorkoutGeneratorView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         
                         
-                        // Basic/Advanced mode label
-                        if !useAdvancedView {
-                            HStack(spacing: 6) {
-                                Image(systemName: "info.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("Tap \(Image(systemName: "slider.horizontal.3")) for advanced options")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
                         // Focus Areas
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Focus Areas")
@@ -751,64 +740,6 @@ struct WorkoutGeneratorView: View {
                             }
                         }
 
-                        // Advanced only: Feedback, Video Options
-                        if useAdvancedView {
-
-                        // Feedback Settings
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Feedback")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-
-                            VStack(spacing: 10) {
-#if os(iOS) || os(tvOS) || os(visionOS)
-                                Toggle(isOn: $enableSound_iOS_tv_vision) {
-                                    Label("Sounds (iOS/tvOS/visionOS)", systemImage: enableSound_iOS_tv_vision ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                                }
-#endif
-#if os(iOS)
-                                Toggle(isOn: $enableHaptics_iOS_vision) {
-                                    Label("Haptics (iOS)", systemImage: enableHaptics_iOS_vision ? "hand.tap.fill" : "hand.raised")
-                                }
-#endif
-#if os(macOS)
-                                Toggle(isOn: $enableSound_macOS) {
-                                    Label("Sounds (macOS)", systemImage: enableSound_macOS ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                                }
-#endif
-                            }
-                        }
-                        
-                        // Video Options
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Video Options")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                            
-                            Picker("Video Mode", selection: $videoModeRaw) {
-                                ForEach(VideoMode.allCases) { mode in
-                                    Text(mode.rawValue).tag(mode.rawValue)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .onChange(of: videoModeRaw) { _, newValue in
-                                videoManager.videoMode = newValue
-                            }
-                            
-                            if VideoMode(rawValue: videoModeRaw) == .downloadOnFirstLaunch {
-                                if let progress = downloadProgress {
-                                    Text("Downloading videos \(progress.completed) of \(progress.total)...")
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    Button("Download Videos") {
-                                        startVideoDownload()
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                }
-                            }
-                        }
-                        
-                        } // end if useAdvancedView
 
                         // Generate Button
                         Button {
@@ -861,13 +792,12 @@ struct WorkoutGeneratorView: View {
                                         .font(.title2)
                                         .fontWeight(.semibold)
                                     Spacer()
-                                    if useAdvancedView {
-                                        Button {
-                                            withAnimation(.easeInOut(duration: 0.2)) {
-                                                showCustomTimers.toggle()
-                                                if !showCustomTimers { exerciseDurationOverrides.removeAll() }
-                                            }
-                                        } label: {
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            showCustomTimers.toggle()
+                                            if !showCustomTimers { exerciseDurationOverrides.removeAll() }
+                                        }
+                                    } label: {
                                             Label(showCustomTimers ? "Timers On" : "Custom Timers",
                                                   systemImage: showCustomTimers ? "timer.circle.fill" : "timer.circle")
                                                 .font(.caption)
@@ -876,9 +806,8 @@ struct WorkoutGeneratorView: View {
                                                 .background(showCustomTimers ? Color.blue : Color.gray.opacity(0.15))
                                                 .foregroundStyle(showCustomTimers ? .white : .primary)
                                                 .clipShape(Capsule())
-                                        }
-                                        .buttonStyle(.plain)
                                     }
+                                    .buttonStyle(.plain)
                                 }
 
                                 LazyVStack(alignment: .leading, spacing: 8) {
@@ -1003,19 +932,15 @@ struct WorkoutGeneratorView: View {
             .toolbar {
 #if os(iOS) || os(visionOS)
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { useAdvancedView.toggle() }
-                    } label: {
-                        Label(useAdvancedView ? "Basic" : "Advanced",
-                              systemImage: useAdvancedView ? "slider.horizontal.below.square.and.square.filled" : "slider.horizontal.3")
+                    Button { showingSettings = true } label: {
+                        Label("Settings", systemImage: "gearshape")
                             .labelStyle(.iconOnly)
                     }
                 }
 #else
                 ToolbarItem {
-                    Button { withAnimation { useAdvancedView.toggle() } } label: {
-                        Label(useAdvancedView ? "Basic" : "Advanced",
-                              systemImage: useAdvancedView ? "slider.horizontal.below.square.and.square.filled" : "slider.horizontal.3")
+                    Button { showingSettings = true } label: {
+                        Label("Settings", systemImage: "gearshape")
                     }
                 }
 #endif
@@ -1044,6 +969,9 @@ struct WorkoutGeneratorView: View {
         }
         .sheet(isPresented: $showingTutorial) {
             TutorialView()
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView()
         }
         .alert("Routine Saved", isPresented: $showSaveConfirmation) {
             Button("OK") { }
@@ -1147,17 +1075,11 @@ struct WorkoutGeneratorView: View {
         }
     }
     
+    /// Kicked off by the first-launch video-mode prompt. Settings has its own button for the
+    /// same job; both go through VideoManager so the key list is assembled in one place.
     private func startVideoDownload() {
-        // Gather keys for all exercises that have known videos in VideoManager
-        let allKeys = exercises.values
-            .flatMap { $0.values.flatMap { $0 } }
-            .map { $0.name }
-            .filter { VideoManager.shared.path(for: $0) != nil }
-            .unique()
-
-        downloadProgress = (completed: 0, total: allKeys.count)
-
-        videoManager.downloadAll(keys: allKeys, progress: { completed, total in
+        downloadProgress = (completed: 0, total: videoManager.videoPaths.count)
+        videoManager.downloadAllKnownVideos(progress: { completed, total in
             downloadProgress = (completed: completed, total: total)
         }, completion: {
             downloadProgress = nil
