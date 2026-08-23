@@ -2,6 +2,9 @@ import SwiftUI
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
+#if canImport(AVKit)
+import AVKit
+#endif
 #if canImport(HealthKit)
 import HealthKit
 #endif
@@ -360,11 +363,67 @@ struct StretchPlayerView: View {
     @State private var playerNode: AVAudioPlayerNode?
     @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
 
+    // Video demos. Every stretch in the catalog carries a videoPath; this player simply had no
+    // playback support until now, which is why they never appeared here.
+    @StateObject private var videoManager = VideoManager.shared
+    @State private var avPlayer: AVPlayer? = nil
+    @State private var playerEndObserver: Any? = nil
+
     static let transitionDuration = 5
+    /// Height of the demo video. Deliberately a constant rather than a fraction of the screen —
+    /// this player has no GeometryReader and doesn't need one.
+    static let videoHeight: CGFloat = 200
 
     var currentStretch: Exercise? {
         guard currentIndex < stretches.count else { return nil }
         return stretches[currentIndex]
+    }
+
+    /// Prefers the stretch's explicit videoPath so Left/Right expanded variants — whose names
+    /// aren't catalog keys — still resolve. Returns nil when the user has chosen "No Video".
+    private var videoURL: URL? {
+        guard let stretch = currentStretch else { return nil }
+        if let path = stretch.videoPath {
+            return videoManager.playableURL(forRelativePath: path)
+        }
+        return videoManager.url(for: stretch.name)
+    }
+
+    /// During "Get Ready" the index has already advanced, so the video previews the stretch
+    /// that's about to start — which is exactly what you want to see while getting into position.
+    @ViewBuilder
+    private var stretchVideo: some View {
+        if videoManager.videoMode != VideoMode.none.rawValue {
+            Group {
+                if let player = avPlayer {
+                    #if os(macOS)
+                    AVPlayerLayerView(player: player)
+                    #else
+                    VideoPlayer(player: player)
+                    #endif
+                } else if videoURL != nil {
+                    // Resolved but not yet loaded — hold the space so the layout doesn't jump.
+                    Rectangle().fill(Color.black.opacity(0.1))
+                } else {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.gray.opacity(0.08))
+                        VStack(spacing: 6) {
+                            Image(systemName: "video.slash")
+                                .font(.title)
+                                .foregroundStyle(.secondary)
+                            Text("No Video Available")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .frame(height: Self.videoHeight)
+            .cornerRadius(10)
+            .padding(.horizontal)
+            .padding(.top, 8)
+        }
     }
 
     private var timerProgress: CGFloat {
@@ -386,6 +445,7 @@ struct StretchPlayerView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                stretchVideo
                 Spacer()
 
                 VStack(spacing: 20) {
@@ -510,8 +570,24 @@ struct StretchPlayerView: View {
         .onAppear {
             timeRemaining = holdDuration
             prepareWatchHandoff()
+            prepareVideoForCurrentStretch(autoplay: isPlaying)
         }
         .onDisappear { stopRoutine() }
+        // Each new stretch swaps the demo clip.
+        .onChange(of: currentIndex) { _, _ in
+            prepareVideoForCurrentStretch(autoplay: isPlaying)
+        }
+        // Starting the routine should start the clip too.
+        .onChange(of: isPlaying) { _, playing in
+            if playing { avPlayer?.play() } else { avPlayer?.pause() }
+        }
+        .onChange(of: isPaused) { _, paused in
+            if paused { avPlayer?.pause() } else if isPlaying { avPlayer?.play() }
+        }
+        // Switching to "No Video" mid-session should take the player down.
+        .onChange(of: videoManager.videoMode) { _, _ in
+            prepareVideoForCurrentStretch(autoplay: isPlaying && !isPaused)
+        }
 #if os(iOS)
         // The Apple Watch tapped Start — begin with a "Get Ready" lead-in
         .onChange(of: connectivityManager.watchRequestedStart) { _, requested in
@@ -623,6 +699,48 @@ struct StretchPlayerView: View {
         sendWorkoutStateToWatch()
     }
 
+    /// Mirrors WorkoutPlayerView: builds the AVPlayerItem off the main thread so swapping clips
+    /// never stalls the countdown, then loops it for the duration of the hold.
+    private func prepareVideoForCurrentStretch(autoplay: Bool) {
+        if let observer = playerEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            playerEndObserver = nil
+        }
+        guard let url = videoURL else {
+            avPlayer?.pause()
+            avPlayer = nil
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let item = AVPlayerItem(url: url)
+            DispatchQueue.main.async {
+                let player = self.avPlayer ?? AVPlayer()
+                // Muted so it never fights the interval cues.
+                player.isMuted = true
+                player.replaceCurrentItem(with: item)
+                player.actionAtItemEnd = .none
+                self.playerEndObserver = NotificationCenter.default.addObserver(
+                    forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+                ) { _ in
+                    player.seek(to: .zero)
+                    player.play()
+                }
+                self.avPlayer = player
+                if autoplay { player.play() }
+            }
+        }
+    }
+
+    private func teardownVideo() {
+        avPlayer?.pause()
+        avPlayer = nil
+        if let observer = playerEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            playerEndObserver = nil
+        }
+    }
+
     private func startTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
@@ -643,6 +761,7 @@ struct StretchPlayerView: View {
     private func stopRoutine() {
         timer?.invalidate()
         timer = nil
+        teardownVideo()
         setIdleTimer(disabled: false)
         sendControlToWatch(.workoutStopped)
 #if canImport(AVFoundation)
