@@ -1491,7 +1491,12 @@ struct WorkoutGeneratorView: View {
                     duration: dur,
                     restDuration: 0,
                     singleSided: ex.singleSided,
-                    moveType: .move
+                    // `isMovement` is a stretch-catalog flag: it marks moving mobility drills
+                    // (Cat-Cow, Arm Circles) apart from static holds (Pigeon Pose), and no
+                    // workout exercise carries it at all. So it only decides the label for
+                    // warm-up and cool-down slots — everything else is a movement by definition,
+                    // and reading the flag for those would mislabel every push-up as a hold.
+                    moveType: ex.isPreparation ? (ex.isMovement ? .move : .hold) : .move
                 ))
             }
         }
