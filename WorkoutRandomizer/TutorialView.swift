@@ -1,29 +1,42 @@
 //  TutorialView.swift
 //  Bodyweight WorkoutRandomizer
 //
-//  First-launch onboarding walkthrough.
-//  Extracted from WorkoutRandomizer.swift — no behaviour change.
+//  The onboarding guide — both the full tour and the shorter "what's new" run.
+//
+//  Every page records the version its feature arrived in. That one field is what lets the same
+//  view serve two jobs: show everything to someone opening the app for the first time, and show
+//  only the genuinely new pages to someone who has already been here. Adding a feature in a
+//  future release means adding a page and tagging it with that release — the filtering below
+//  needs no further edits.
+//
+//  Who sees what is decided by `lastSeenTutorialVersion`, which is written when the guide is
+//  finished or skipped. An empty value means the guide has never been completed under the
+//  version-aware scheme, which covers both a fresh install and every 1.x user upgrading to 2.0 —
+//  both get the full tour, which is exactly what the 2.0 release wants.
 
 import SwiftUI
-internal import UniformTypeIdentifiers
-import Observation
-#if canImport(AVFoundation)
-import AVFoundation
-#endif
-#if canImport(AVKit)
-import AVKit
-#endif
-#if canImport(HealthKit)
-import HealthKit
-#endif
-#if os(macOS)
-import AppKit
-#endif
 
 // MARK: - TutorialView
 
 struct TutorialView: View {
-    @AppStorage("hasSeenTutorial") private var hasSeenTutorial = false
+    /// Which run of the guide this is.
+    enum Mode: Equatable {
+        /// Every page. First launch, or requested from Settings.
+        case full
+        /// Only pages introduced after the given version.
+        case whatsNew(since: String)
+
+        var id: String {
+            switch self {
+            case .full: return "full"
+            case .whatsNew(let since): return "whatsNew-\(since)"
+            }
+        }
+    }
+
+    var mode: Mode = .full
+
+    @AppStorage("lastSeenTutorialVersion") private var lastSeenTutorialVersion = ""
     @State private var page = 0
     @Environment(\.dismiss) private var dismiss
 
@@ -32,17 +45,129 @@ struct TutorialView: View {
         let body: String
         let icon: String
         let color: Color
+        /// App version this page's subject arrived in. Drives what a returning user still needs.
+        var since: String = "1.0"
+        /// A release summary rather than a feature explanation. Only worth showing while its
+        /// release is the current one — a 3.0 user meeting the app for the first time has no
+        /// use for "What's New in 2.0".
+        var isReleaseOverview: Bool = false
     }
 
-    private let pages: [TutorialPage] = [
-        TutorialPage(title: "Welcome!", body: "Generate custom bodyweight workouts tailored to your focus areas, difficulty level, and available equipment.", icon: "figure.run", color: .blue),
-        TutorialPage(title: "Focus & Equipment", body: "Tap the icon chips to choose which muscle groups to target. Select one or many — the generated workout will draw from those areas. Pick the equipment you have available too.", icon: "figure.mixed.cardio", color: .purple),
-        TutorialPage(title: "Saved Routines", body: "Tap 'Saved Routines' on the home screen for expertly curated workouts, including Athlean-X morning stretches, bedtime stretches, and a 10-minute ab routine — each with per-exercise timers built in.", icon: "folder.fill", color: .brown),
-        TutorialPage(title: "Audio & Video", body: "Exercise videos stream by default over Wi-Fi/cellular. In Advanced mode you can pre-download them for offline use or disable video entirely. Audio countdown cues play automatically — set your phone to ring (not silent) for sound.", icon: "play.rectangle.fill", color: .pink),
-        TutorialPage(title: "Stretch Routine", body: "The Stretch Routine section is completely separate from regular workouts. Set hold duration, choose your categories, and optionally cap the total time — no cardio-style rest intervals.", icon: "figure.cooldown", color: .teal),
-        TutorialPage(title: "Set Your Intention", body: "Tell the app your goal — Fat Burn, Cardio Endurance, Strength, or General Fitness. During workouts, tap your HR Zone for personalized zone tips.", icon: "flame", color: .orange),
-        TutorialPage(title: "Apple Watch", body: "Pair your Apple Watch to see live heart rate, HR zone, and calorie data. The Watch status bar below the Start button always shows connection state — look for 'Watch Connected' or 'You can also start from your Apple Watch'.", icon: "applewatch", color: .red),
+    // Static so the filtering below — and the caller's "is there anything new?" check — can run
+    // without standing up a view.
+    private static let allPages: [TutorialPage] = [
+        TutorialPage(
+            title: "What's New in 2.0",
+            body: "The biggest update yet: a five-tab layout, two new ladder timer styles, Pyramid workouts that fit the length you asked for, optional warm-ups and cool-downs matched to your focus, video demos in the stretch player, and a proper Settings screen. The next few pages cover all of it.",
+            icon: "sparkles", color: .indigo, since: "2.0", isReleaseOverview: true
+        ),
+        TutorialPage(
+            title: "Welcome!",
+            body: "Generate custom bodyweight workouts tailored to your focus areas, difficulty level, and available equipment.",
+            icon: "figure.run", color: .blue, since: "1.0"
+        ),
+        TutorialPage(
+            title: "Getting Around",
+            body: "Five tabs along the bottom. Generate builds a workout. Exercises browses the whole catalog with demo videos. Stretch runs a stretch-only session. Saved holds curated routines and your own. My Exercises is for moves you add yourself.",
+            icon: "square.grid.2x2.fill", color: .cyan, since: "2.0"
+        ),
+        TutorialPage(
+            title: "Focus, Difficulty & Equipment",
+            body: "Tap the icon chips to choose which muscle groups to target — one or many. Difficulty is multi-select too, so a single session can mix Beginner and Medium. Tell the app what equipment you actually have and it only draws from moves you can do.",
+            icon: "figure.mixed.cardio", color: .purple, since: "1.0"
+        ),
+        TutorialPage(
+            title: "Timer Styles",
+            body: "Standard runs a steady work/rest cycle. Pyramid ramps up and back down across the length you picked. Repeating Blocks cycles the same group of exercises. Add-On builds a ladder, each round repeating the last and adding a move. Add-On + Take Away climbs, then peels them back off. Rest is half the work interval, so 45 seconds of effort earns 20 back.",
+            icon: "timer", color: .green, since: "2.0"
+        ),
+        TutorialPage(
+            title: "Warm-Up & Cool-Down",
+            body: "Switch either on in the Generate tab. The warm-up runs about a tenth of your session; the cool-down is a couple of longer holds at the end. Both are drawn from stretches that match the focus areas you chose, and neither one disturbs the timer pattern you picked.",
+            icon: "figure.flexibility", color: .mint, since: "2.0"
+        ),
+        TutorialPage(
+            title: "Custom Timers",
+            body: "Need one exercise longer than the rest? Tap Custom Timers after generating and set any slot by hand. Your edits follow the routine everywhere it goes — playback, the Apple Watch, and anything you save or export.",
+            icon: "slider.horizontal.3", color: .orange, since: "2.0"
+        ),
+        TutorialPage(
+            title: "Stretch Routine",
+            body: "The Stretch tab is completely separate from workouts. Set your hold duration, choose categories, and optionally cap the total time — no cardio-style rest intervals. Demo videos now play right in the stretch player too.",
+            icon: "figure.cooldown", color: .teal, since: "1.0"
+        ),
+        TutorialPage(
+            title: "Saved & Shared Routines",
+            body: "The Saved tab has curated workouts — Athlean-X morning stretches, a bedtime routine, and a 10-minute ab circuit — each with per-exercise timers built in. Anything you generate can be saved there under My Routines, or exported to a file and imported back later.",
+            icon: "folder.fill", color: .brown, since: "1.4"
+        ),
+        TutorialPage(
+            title: "My Exercises",
+            body: "Add your own moves with a name, focus area, and difficulty. They join the pool the generator draws from and stay on your device between updates.",
+            icon: "person.badge.plus", color: .indigo, since: "1.3"
+        ),
+        TutorialPage(
+            title: "Audio, Video & Settings",
+            body: "Exercise videos stream by default over Wi-Fi or cellular. The gear button in the top right opens Settings, where you can pre-download them for offline use, turn video off entirely, and toggle sounds and haptics — all of which now stick between launches. Audio countdown cues play automatically, so set your phone to ring rather than silent. You can reopen this guide from Settings any time.",
+            icon: "play.rectangle.fill", color: .pink, since: "2.0"
+        ),
+        TutorialPage(
+            title: "Set Your Intention",
+            body: "Tell the app your goal — Fat Burn, Cardio Endurance, Strength, or General Fitness. During workouts, tap your HR Zone for personalized zone tips.",
+            icon: "flame", color: .orange, since: "1.0"
+        ),
+        TutorialPage(
+            title: "Live Stats & Recap",
+            body: "While a workout runs you get live exercise time, heart-rate zone, and burn type. When it ends, the recap shows total and working time, calories, peak and average heart rate — and if you wore your Watch, how long you spent in each zone.",
+            icon: "chart.bar.fill", color: .purple, since: "1.3"
+        ),
+        TutorialPage(
+            title: "Apple Watch",
+            body: "Pair your Apple Watch for live heart rate, zone, and calorie data. You can start and stop a session from your wrist, and the Watch status line below the Start button always shows where the connection stands.",
+            icon: "applewatch", color: .red, since: "1.1"
+        ),
     ]
+
+    /// The pages a given run should show.
+    private static func pages(for mode: Mode) -> [TutorialPage] {
+        allPages.filter { page in
+            if page.isReleaseOverview,
+               AppVersion.compare(page.since, AppVersion.current) != .orderedSame {
+                return false
+            }
+            switch mode {
+            case .full:
+                return true
+            case .whatsNew(let since):
+                return AppVersion.isNewer(page.since, than: since)
+            }
+        }
+    }
+
+    private var pages: [TutorialPage] { Self.pages(for: mode) }
+
+    /// Whether a "what's new" run for someone last shown `version` would have anything to say.
+    /// The caller checks this before presenting, so a dot release that documents nothing new
+    /// doesn't greet everyone with an empty guide.
+    static func hasPages(newerThan version: String) -> Bool {
+        !pages(for: .whatsNew(since: version)).isEmpty
+    }
+
+    private var navigationTitle: String {
+        switch mode {
+        case .full: return "Welcome to WorkoutRandomizer"
+        case .whatsNew: return "What's New"
+        }
+    }
+
+    /// Dots get thin once there are a lot of them, so a full-length guide's indicator still
+    /// fits across a phone.
+    private var indicatorWidth: CGFloat { pages.count > 9 ? 10 : 24 }
+
+    private func finish() {
+        lastSeenTutorialVersion = AppVersion.current
+        dismiss()
+    }
 
     var body: some View {
         NavigationStack {
@@ -85,7 +210,11 @@ struct TutorialView: View {
                         ForEach(0..<pages.count, id: \.self) { i in
                             Capsule()
                                 .fill(i == page ? Color.primary : Color.secondary.opacity(0.25))
-                                .frame(width: 24, height: 4)
+                                .frame(width: indicatorWidth, height: 4)
+                                // A 4pt-tall dot is far too small to aim at; give it a real
+                                // touch target without changing how it looks.
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
                                 .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { page = i } }
                         }
                     }
@@ -100,19 +229,19 @@ struct TutorialView: View {
                     .disabled(page == pages.count - 1)
                     .opacity(page == pages.count - 1 ? 0.25 : 1)
                 }
-                .padding(.bottom, 20)
+                .padding(.bottom, 12)
             }
-            .navigationTitle("Welcome to WorkoutRandomizer")
+            .navigationTitle(navigationTitle)
 #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Skip") { hasSeenTutorial = true; dismiss() }
+                    Button("Skip") { finish() }
                 }
             }
 #else
             .toolbar {
-                ToolbarItem { Button("Skip") { hasSeenTutorial = true; dismiss() } }
+                ToolbarItem { Button("Skip") { finish() } }
             }
 #endif
         }
@@ -129,6 +258,7 @@ struct TutorialView: View {
             Text(p.title)
                 .font(.title)
                 .fontWeight(.bold)
+                .multilineTextAlignment(.center)
             Text(p.body)
                 .font(.body)
                 .multilineTextAlignment(.center)
@@ -136,13 +266,10 @@ struct TutorialView: View {
                 .padding(.horizontal, 32)
             Spacer()
             if index == pages.count - 1 {
-                Button("Get Started") {
-                    hasSeenTutorial = true
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(p.color)
-                .controlSize(.large)
+                Button(mode == .full ? "Get Started" : "Done") { finish() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(p.color)
+                    .controlSize(.large)
             }
             Spacer(minLength: 50)
         }

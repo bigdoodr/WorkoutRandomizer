@@ -14,6 +14,11 @@
 import SwiftUI
 
 struct SettingsView: View {
+    /// Raised, not acted on. The guide has to be presented by whoever presented *this* sheet,
+    /// after this one closes — SwiftUI supports a single sheet at a time, and asking for a
+    /// second from inside the first is what wedges the presentation machinery.
+    @Binding var showGuideRequest: Bool
+
     @AppStorage("enableSound_iOS_tv_vision") private var enableSound_iOS_tv_vision = true
     @AppStorage("enableHaptics_iOS_vision") private var enableHaptics_iOS_vision = true
     @AppStorage("enableSound_macOS") private var enableSound_macOS = true
@@ -75,6 +80,17 @@ struct SettingsView: View {
                     Text("Video")
                 } footer: {
                     Text("Stream plays demos over the network. Download All keeps them on device for offline workouts.")
+                }
+
+                Section {
+                    Button("Show Full Guide") {
+                        showGuideRequest = true
+                        dismiss()
+                    }
+                } header: {
+                    Text("Guide")
+                } footer: {
+                    Text("Walks through every feature. A new release shows only what changed in it; this shows all of it.")
                 }
             }
             .navigationTitle("Settings")

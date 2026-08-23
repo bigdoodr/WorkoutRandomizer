@@ -48,9 +48,32 @@ struct WorkoutGeneratorView: View {
     @State private var selectedEquipment: Set<String> = ["None"]
     @State private var timerStyle: TimerStyle = .standard
     @State private var selectedIntention: WorkoutIntention = .generalFitness
-    @AppStorage("hasSeenTutorial") private var hasSeenTutorial = false
-    @State private var showingTutorial = false
-    @State private var showingSettings = false
+    /// Last app version the user was walked through. Empty means never — which covers a fresh
+    /// install *and* anyone arriving from a build that predates this tracking, so every 1.x
+    /// user gets the full 2.0 tour.
+    @AppStorage("lastSeenTutorialVersion") private var lastSeenTutorialVersion = ""
+    /// The guide and Settings share one presentation. They used to be two independent `.sheet`
+    /// modifiers, and on a first launch the video-mode dialog and the guide both went up in the
+    /// same pass — SwiftUI presented one, silently swallowed the other, and then refused every
+    /// later sheet ("only presenting a single sheet is supported"), which is what made the
+    /// Settings button do nothing until the app was force-quit.
+    @State private var activeSheet: ActiveSheet? = nil
+    /// Set by Settings when the user asks for the guide; acted on once Settings has closed.
+    @State private var showGuideRequest = false
+    /// The launch-time decision runs once, not on every return to this tab.
+    @State private var didEvaluateGuide = false
+
+    private enum ActiveSheet: Identifiable, Equatable {
+        case guide(TutorialView.Mode)
+        case settings
+
+        var id: String {
+            switch self {
+            case .guide(let mode): return "guide-\(mode.id)"
+            case .settings: return "settings"
+            }
+        }
+    }
     @State private var customExerciseStore = CustomExerciseStore.shared
     @State private var showCustomTimers = false
     @State private var exerciseDurationOverrides: [Int: Int] = [:]
@@ -932,14 +955,14 @@ struct WorkoutGeneratorView: View {
             .toolbar {
 #if os(iOS) || os(visionOS)
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showingSettings = true } label: {
+                    Button { activeSheet = .settings } label: {
                         Label("Settings", systemImage: "gearshape")
                             .labelStyle(.iconOnly)
                     }
                 }
 #else
                 ToolbarItem {
-                    Button { showingSettings = true } label: {
+                    Button { activeSheet = .settings } label: {
                         Label("Settings", systemImage: "gearshape")
                     }
                 }
@@ -963,11 +986,23 @@ struct WorkoutGeneratorView: View {
             // stopping now requires the confirmed Stop button inside the player.
             .interactiveDismissDisabled(true)
         }
-        .sheet(isPresented: $showingTutorial) {
-            TutorialView()
-        }
-        .sheet(isPresented: $showingSettings) {
-            SettingsView()
+        // One sheet for the guide and Settings, so the two can never both try to present.
+        // Whatever should follow a dismissal is decided in onDismiss rather than by setting a
+        // second flag alongside the first.
+        .sheet(item: $activeSheet, onDismiss: {
+            if showGuideRequest {
+                showGuideRequest = false
+                activeSheet = .guide(.full)
+            } else {
+                promptForVideoModeIfNeeded()
+            }
+        }) { sheet in
+            switch sheet {
+            case .guide(let mode):
+                TutorialView(mode: mode)
+            case .settings:
+                SettingsView(showGuideRequest: $showGuideRequest)
+            }
         }
         .alert("Routine Saved", isPresented: $showSaveConfirmation) {
             Button("OK") { }
@@ -1016,12 +1051,17 @@ struct WorkoutGeneratorView: View {
             }
         }
         .onAppear {
-            if !videoManager.didPromptForVideoMode {
-                showVideoModePrompt = true
+            // The guide goes first and the video-mode prompt follows it, which is both the only
+            // safe order and the better one: the Audio, Video & Settings page explains the
+            // choice immediately before it gets asked.
+            if !didEvaluateGuide {
+                didEvaluateGuide = true
+                if let mode = pendingGuideMode() {
+                    activeSheet = .guide(mode)
+                    return
+                }
             }
-            if !hasSeenTutorial {
-                showingTutorial = true
-            }
+            promptForVideoModeIfNeeded()
         }
         .task {
             await catalog.refresh()
@@ -1082,6 +1122,25 @@ struct WorkoutGeneratorView: View {
         })
     }
     
+    /// Which run of the guide, if any, this launch owes the user.
+    ///
+    /// Nothing recorded means the full tour — a first install, or an upgrade from a build that
+    /// predated this tracking. Otherwise only a genuinely newer version earns a "what's new",
+    /// and only when there are pages tagged for it: a release that documents nothing new should
+    /// pass in silence rather than open an empty guide.
+    private func pendingGuideMode() -> TutorialView.Mode? {
+        guard !lastSeenTutorialVersion.isEmpty else { return .full }
+        guard AppVersion.isNewer(AppVersion.current, than: lastSeenTutorialVersion),
+              TutorialView.hasPages(newerThan: lastSeenTutorialVersion) else { return nil }
+        return .whatsNew(since: lastSeenTutorialVersion)
+    }
+
+    /// Ask which video mode to use, but never while something else is on screen.
+    private func promptForVideoModeIfNeeded() {
+        guard activeSheet == nil, !videoManager.didPromptForVideoMode else { return }
+        showVideoModePrompt = true
+    }
+
     private func generateWorkout() {
         isGenerating = true
 
