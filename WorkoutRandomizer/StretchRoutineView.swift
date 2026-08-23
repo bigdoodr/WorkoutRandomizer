@@ -14,6 +14,13 @@ import AppKit
 
 // MARK: - Stretch Routine Setup
 
+/// One entry in the category row. "All" is a case rather than a button outside the loop so the
+/// row is a single uniform sequence — which is what lets OverflowScrollRow measure and page it.
+private enum CategoryChip: Hashable {
+    case all
+    case category(String)
+}
+
 struct StretchRoutineView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var catalog = ExerciseCatalog.shared
@@ -71,8 +78,11 @@ struct StretchRoutineView: View {
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
+                    // "All" is folded into the item list as a case rather than sitting outside
+                    // the loop, so the row is one uniform sequence the scroller can measure.
+                    OverflowScrollRow(items: [CategoryChip.all] + stretchCategories.map(CategoryChip.category)) { entry in
+                        switch entry {
+                        case .all:
                             let allSelected = selectedCategories.count == stretchCategories.count
                             Button {
                                 selectedCategories = allSelected ? [] : Set(stretchCategories)
@@ -90,31 +100,29 @@ struct StretchRoutineView: View {
                             }
                             .buttonStyle(.plain)
 
-                            ForEach(stretchCategories, id: \.self) { category in
-                                let isSelected = selectedCategories.contains(category)
-                                let color = categoryColor(category)
-                                Button {
-                                    if isSelected {
-                                        selectedCategories.remove(category)
-                                    } else {
-                                        selectedCategories.insert(category)
-                                    }
-                                } label: {
-                                    HStack(spacing: 5) {
-                                        Image(systemName: categoryIcon(category))
-                                        Text(categoryShortLabel(category))
-                                    }
-                                    .font(.subheadline)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 7)
-                                    .background(isSelected ? color : Color.gray.opacity(0.15))
-                                    .foregroundStyle(isSelected ? .white : .primary)
-                                    .clipShape(Capsule())
+                        case .category(let category):
+                            let isSelected = selectedCategories.contains(category)
+                            let color = categoryColor(category)
+                            Button {
+                                if isSelected {
+                                    selectedCategories.remove(category)
+                                } else {
+                                    selectedCategories.insert(category)
                                 }
-                                .buttonStyle(.plain)
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: categoryIcon(category))
+                                    Text(categoryShortLabel(category))
+                                }
+                                .font(.subheadline)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(isSelected ? color : Color.gray.opacity(0.15))
+                                .foregroundStyle(isSelected ? .white : .primary)
+                                .clipShape(Capsule())
                             }
+                            .buttonStyle(.plain)
                         }
-                        .padding(.vertical, 2)
                     }
                 }
 

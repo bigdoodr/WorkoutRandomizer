@@ -143,81 +143,47 @@ struct WorkoutGeneratorView: View {
         }
     }
 
-#if os(macOS)
-    private var platformBackgroundColor: NSColor { .windowBackgroundColor }
-#else
-    private var platformBackgroundColor: UIColor { .systemBackground }
-#endif
-
     @ViewBuilder
     private var focusAreaFilterRow: some View {
-        ZStack(alignment: .trailing) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(quickFilters, id: \.label) { filter in
-                        Button { toggleFilter(filter) } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: filter.icon)
-                                Text(filter.label)
-                            }
-                            .font(.subheadline)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(isFilterActive(filter) ? filter.color : Color.gray.opacity(0.15))
-                            .foregroundStyle(isFilterActive(filter) ? .white : .primary)
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
+        OverflowScrollRow(items: quickFilters) { filter in
+            Button { toggleFilter(filter) } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: filter.icon)
+                    Text(filter.label)
                 }
-                .padding(.vertical, 2)
-                .padding(.trailing, 24)
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(isFilterActive(filter) ? filter.color : Color.gray.opacity(0.15))
+                .foregroundStyle(isFilterActive(filter) ? .white : .primary)
+                .clipShape(Capsule())
             }
-            LinearGradient(
-                colors: [.clear, Color(platformBackgroundColor)],
-                startPoint: .leading, endPoint: .trailing
-            )
-            .frame(width: 36)
-            .allowsHitTesting(false)
+            .buttonStyle(.plain)
         }
     }
 
     @ViewBuilder
     private var difficultyFilterRow: some View {
-        ZStack(alignment: .trailing) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(difficulties, id: \.self) { level in
-                        Button {
-                            if selectedDifficulties.contains(level) {
-                                selectedDifficulties.remove(level)
-                            } else {
-                                selectedDifficulties.insert(level)
-                            }
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: difficultyIcon(level))
-                                Text(level)
-                            }
-                            .font(.subheadline)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(selectedDifficulties.contains(level) ? Color.blue : Color.gray.opacity(0.15))
-                            .foregroundStyle(selectedDifficulties.contains(level) ? .white : .primary)
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
+        OverflowScrollRow(items: difficulties) { level in
+            Button {
+                if selectedDifficulties.contains(level) {
+                    selectedDifficulties.remove(level)
+                } else {
+                    selectedDifficulties.insert(level)
                 }
-                .padding(.vertical, 2)
-                .padding(.trailing, 24)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: difficultyIcon(level))
+                    Text(level)
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(selectedDifficulties.contains(level) ? Color.blue : Color.gray.opacity(0.15))
+                .foregroundStyle(selectedDifficulties.contains(level) ? .white : .primary)
+                .clipShape(Capsule())
             }
-            LinearGradient(
-                colors: [.clear, Color(platformBackgroundColor)],
-                startPoint: .leading, endPoint: .trailing
-            )
-            .frame(width: 36)
-            .allowsHitTesting(false)
+            .buttonStyle(.plain)
         }
     }
 
@@ -454,32 +420,18 @@ struct WorkoutGeneratorView: View {
 
                             // Capsule chips in a scroller rather than a fixed HStack — five
                             // styles will not fit across an iPhone at any sensible font size.
-                            ZStack(alignment: .trailing) {
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 8) {
-                                        ForEach(TimerStyle.allCases) { style in
-                                            Button { timerStyle = style } label: {
-                                                Text(style.rawValue)
-                                                    .font(.subheadline)
-                                                    .lineLimit(1)
-                                                    .padding(.horizontal, 14)
-                                                    .padding(.vertical, 8)
-                                                    .background(timerStyle == style ? Color.blue : Color.gray.opacity(0.12))
-                                                    .foregroundStyle(timerStyle == style ? .white : .primary)
-                                                    .clipShape(Capsule())
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
-                                    }
-                                    .padding(.vertical, 2)
-                                    .padding(.trailing, 24)
+                            OverflowScrollRow(items: TimerStyle.allCases) { style in
+                                Button { timerStyle = style } label: {
+                                    Text(style.rawValue)
+                                        .font(.subheadline)
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .background(timerStyle == style ? Color.blue : Color.gray.opacity(0.12))
+                                        .foregroundStyle(timerStyle == style ? .white : .primary)
+                                        .clipShape(Capsule())
                                 }
-                                LinearGradient(
-                                    colors: [.clear, Color(platformBackgroundColor)],
-                                    startPoint: .leading, endPoint: .trailing
-                                )
-                                .frame(width: 36)
-                                .allowsHitTesting(false)
+                                .buttonStyle(.plain)
                             }
 
                             if timerStyle.isLadder {
@@ -517,22 +469,17 @@ struct WorkoutGeneratorView: View {
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text("Total Duration")
                                             .font(.subheadline)
-                                        ScrollView(.horizontal, showsIndicators: false) {
-                                            HStack(spacing: 8) {
-                                                ForEach([5, 10, 20, 30, 45, 60, 90], id: \.self) { preset in
-                                                    Button { totalDuration = preset } label: {
-                                                        Text("\(preset) min")
-                                                            .font(.subheadline)
-                                                            .padding(.horizontal, 14)
-                                                            .padding(.vertical, 8)
-                                                            .background(totalDuration == preset ? Color.blue : Color.gray.opacity(0.12))
-                                                            .foregroundStyle(totalDuration == preset ? .white : .primary)
-                                                            .clipShape(Capsule())
-                                                    }
-                                                    .buttonStyle(.plain)
-                                                }
+                                        OverflowScrollRow(items: [5, 10, 20, 30, 45, 60, 90]) { preset in
+                                            Button { totalDuration = preset } label: {
+                                                Text("\(preset) min")
+                                                    .font(.subheadline)
+                                                    .padding(.horizontal, 14)
+                                                    .padding(.vertical, 8)
+                                                    .background(totalDuration == preset ? Color.blue : Color.gray.opacity(0.12))
+                                                    .foregroundStyle(totalDuration == preset ? .white : .primary)
+                                                    .clipShape(Capsule())
                                             }
-                                            .padding(.horizontal, 2)
+                                            .buttonStyle(.plain)
                                         }
                                     }
 
