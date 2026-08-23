@@ -949,19 +949,15 @@ struct WorkoutGeneratorView: View {
         .sheet(isPresented: $showingWorkout) {
             WorkoutPlayerView(
                 routine: generatedRoutine,
-                exerciseDuration: exerciseDuration,
-                restDuration: effectiveRestDuration,
-                restEvery: restEvery,
-                timerStyle: timerStyle,
+                // The same value the Custom Timers editor reads, so the preview and the clock
+                // are guaranteed to agree.
+                timing: timing,
                 intention: selectedIntention,
                 selectedFocusAreas: selectedFocusAreas,
-                blocksConfig: timerStyle == .blocks ? RepeatingBlocksConfig(exercisesPerBlock: exercisesPerBlock, blockDurations: blockDurations) : nil,
                 enableSound_iOS_tv_vision: enableSound_iOS_tv_vision,
                 enableHaptics_iOS_vision: enableHaptics_iOS_vision,
                 enableSound_macOS: enableSound_macOS,
-                durationOverrides: exerciseDurationOverrides.isEmpty ? nil : exerciseDurationOverrides,
-                ladderRoundStarts: ladderRoundStarts.isEmpty ? nil : ladderRoundStarts,
-                pyramidLadder: pyramidPlan.ladder
+                ladderRoundStarts: ladderRoundStarts.isEmpty ? nil : ladderRoundStarts
             )
             // A stray scroll/swipe shouldn't be able to abruptly end an active routine —
             // stopping now requires the confirmed Stop button inside the player.
@@ -1171,7 +1167,11 @@ struct WorkoutGeneratorView: View {
                 // One exercise per rung of the duration-derived ladder.
                 maxExercises = pyramidPlan.ladder.count
             case .blocks:
-                maxExercises = blocksTotalSets * blocksCount * exercisesPerBlock
+                // One set's worth, not the whole session. Asking for every slot at once let
+                // createBalancedRoutine fill them all with *distinct* exercises, so a style
+                // named Repeating Blocks repeated nothing — the sets are built below by
+                // reusing this base rather than by drawing more exercises.
+                maxExercises = blocksCount * exercisesPerBlock
             case .standard:
                 let fullCycle = Double(exerciseDuration) + (Double(effectiveRestDuration) / Double(restEvery))
                 let totalSecs = Double(totalDuration) * 60
@@ -1186,26 +1186,36 @@ struct WorkoutGeneratorView: View {
             // Build final routine with rests
             var routine: [Exercise] = []
             if timerStyle == .pyramid || timerStyle == .blocks {
-                // For blocks with shuffle: divide exercises into sets and shuffle each independently
+                // Blocks runs the same base set once per total-set; shuffle only decides
+                // whether each repeat keeps the base order or gets its own arrangement.
+                // Previously the un-shuffled path fell through to `selected` unchanged, which
+                // is why it produced one long list of unique exercises instead of repeats.
                 let exercises: [Exercise]
-                if timerStyle == .blocks && shuffleBlockSets && blocksTotalSets > 1 {
-                    let setSize = blocksCount * exercisesPerBlock
-                    var basePool = Array(selected.prefix(setSize))
-                    // Don't split a Left/Right pair across the set boundary — pull the
-                    // matching Right in so shuffling never separates the two sides.
-                    if let last = basePool.last, last.name.hasSuffix(" (Left)"),
-                       basePool.count < selected.count,
-                       selected[basePool.count].name == last.name.replacingOccurrences(of: " (Left)", with: " (Right)") {
-                        basePool.append(selected[basePool.count])
+                if timerStyle == .blocks && blocksTotalSets > 1 {
+                    // The base has to be *exactly* one set long. createBalancedRoutine can
+                    // overshoot by one when its last pick is single-sided and both sides land,
+                    // and repeating a base of the wrong length would push every later set's
+                    // block boundaries one slot further out of step.
+                    var base = selected
+                    if base.count > maxExercises {
+                        base.removeLast(2)   // the trailing Left/Right pair, kept together
+                        let used = Set(base.map { $0.name })
+                        // Prefer an unused two-sided move for the freed slot; if the pool is
+                        // already exhausted, repeating one beats leaving the set a slot short.
+                        let fresh = pool.shuffled().first(where: { !$0.singleSided && !used.contains($0.name) })
+                        let reused = base.shuffled().first(where: { !$0.name.hasSuffix(" (Left)") && !$0.name.hasSuffix(" (Right)") })
+                        if let filler = fresh ?? reused { base.append(filler) }
                     }
                     // Shuffle Left/Right pairs as a single atomic unit so the two sides
                     // always stay back-to-back after shuffling.
-                    let baseUnits = atomicSideUnits(basePool)
-                    var shuffled: [Exercise] = []
+                    let baseUnits = atomicSideUnits(base)
+                    var repeated: [Exercise] = []
                     for _ in 0..<blocksTotalSets {
-                        shuffled.append(contentsOf: baseUnits.shuffled().flatMap { $0 })
+                        repeated.append(contentsOf: shuffleBlockSets
+                                        ? baseUnits.shuffled().flatMap { $0 }
+                                        : base)
                     }
-                    exercises = shuffled
+                    exercises = repeated
                 } else {
                     exercises = selected
                 }

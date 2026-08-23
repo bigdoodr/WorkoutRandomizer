@@ -22,34 +22,21 @@ import AppKit
 
 struct WorkoutPlayerView: View {
     let routine: [Exercise]
-    let exerciseDuration: Int
-    let restDuration: Int
-    let restEvery: Int
-    let timerStyle: TimerStyle
+    /// Every timing decision in one value: style, durations, block config, the Pyramid ladder
+    /// and any Custom Timers overrides.
+    ///
+    /// These used to arrive as six separate parameters that the player immediately reassembled
+    /// into exactly this — which meant the generator and the player each had to remember to
+    /// keep six things in step, and adding anything timing-related (the Pyramid ladder was the
+    /// last one) meant threading a seventh through both.
+    let timing: WorkoutTiming
     let intention: WorkoutIntention
     var selectedFocusAreas: Set<String> = []
-    let blocksConfig: RepeatingBlocksConfig?
     let enableSound_iOS_tv_vision: Bool
     let enableHaptics_iOS_vision: Bool
     let enableSound_macOS: Bool
-    var durationOverrides: [Int: Int]? = nil
     /// Routine indices where each ladder round begins. Non-nil only for Add-On styles.
     var ladderRoundStarts: [Int]? = nil
-    /// The Pyramid work sequence this routine was generated against.
-    var pyramidLadder: [Int]? = nil
-
-    /// All timing rules live in WorkoutTiming so the player and the generator's Custom Timers
-    /// editor can never disagree about how long a slot runs.
-    private var timing: WorkoutTiming {
-        WorkoutTiming(
-            style: timerStyle,
-            exerciseDuration: exerciseDuration,
-            restDuration: restDuration,
-            blocksConfig: blocksConfig,
-            overrides: durationOverrides ?? [:],
-            pyramidLadder: pyramidLadder ?? WorkoutTiming.pyramidPass(steps: 10)
-        )
-    }
 
     @State private var currentIndex = 0
     @State private var timeRemaining = 0
@@ -245,7 +232,7 @@ struct WorkoutPlayerView: View {
                         // Pyramid level indicator — shows the duration actually being counted
                         // down (durationForCurrentPosition), so a custom timer override for
                         // this exercise is reflected here instead of the un-overridden phase value.
-                        if timerStyle == .pyramid && isPlaying {
+                        if timing.style == .pyramid && isPlaying {
                             let phase = currentPyramidPhase
                             Text("Pyramid \(phase + 1) of \(timing.pyramidIntervals.count)  •  \(durationForCurrentPosition)s")
                                 .font(.caption)
@@ -254,7 +241,7 @@ struct WorkoutPlayerView: View {
 
                         // Blocks progress indicator — same rationale as above: use the
                         // override-aware duration rather than the raw block config value.
-                        if timerStyle == .blocks && isPlaying,
+                        if timing.style == .blocks && isPlaying,
                            let position = timing.blockPosition(at: currentIndex, in: routine) {
                             Text("Block \(position.blockIndex + 1) of \(position.blockCount)  •  Set \(position.setNumber)  •  \(durationForCurrentPosition)s")
                                 .font(.caption)
@@ -263,7 +250,7 @@ struct WorkoutPlayerView: View {
 
                         // Ladder progress — without this you cannot tell how far up (or back
                         // down) the ladder you are, since the exercises simply repeat.
-                        if timerStyle.isLadder && isPlaying, let ladder = currentLadderRound {
+                        if timing.style.isLadder && isPlaying, let ladder = currentLadderRound {
                             Text("Round \(ladder.round) of \(ladder.total)  •  \(durationForCurrentPosition)s")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
