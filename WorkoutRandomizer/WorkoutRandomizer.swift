@@ -64,6 +64,10 @@ enum FeedbackEvent {
     case warning
     case end
     case complete
+    /// Warm-up is done and the first real work exercise is starting.
+    case enterActive
+    /// The last work exercise is done and the cool-down is starting.
+    case enterCoolDown
 }
 
 @main

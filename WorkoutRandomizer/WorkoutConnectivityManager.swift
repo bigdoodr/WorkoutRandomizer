@@ -9,6 +9,10 @@ public enum FeedbackType: String, Codable {
     case warning
     case end
     case complete
+    /// Warm-up finished, first work exercise starting.
+    case enterActive
+    /// Last work exercise finished, cool-down starting.
+    case enterCoolDown
 }
 
 public enum ControlMessage: String, Codable {
@@ -52,6 +56,10 @@ class WorkoutConnectivityManager: ObservableObject {
     @Published var isWatchReachable = false
     @Published var watchRequestedStart = false
     @Published var watchRequestedStop = false
+    /// The watch's Pause/Resume button was tapped — the active player should toggle pause.
+    @Published var watchRequestedPause = false
+    /// The watch's Skip button was tapped — the active player should advance one slot.
+    @Published var watchRequestedSkip = false
     @Published var heartRate: Double = 0
     @Published var activeCalories: Double = 0
     @Published var isWatchWorkoutActive = false
@@ -320,6 +328,14 @@ private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
             Task { @MainActor in
                 WorkoutConnectivityManager.shared.watchRequestedStop = true
             }
+        case "requestPause":
+            Task { @MainActor in
+                WorkoutConnectivityManager.shared.watchRequestedPause = true
+            }
+        case "requestSkip":
+            Task { @MainActor in
+                WorkoutConnectivityManager.shared.watchRequestedSkip = true
+            }
         case "zoneData":
             if let data = message["payload"] as? Data,
                let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
@@ -381,4 +397,3 @@ final class WorkoutConnectivityManager: NSObject, ObservableObject {
 }
 
 #endif
-

@@ -145,6 +145,15 @@ struct WorkoutTiming {
         )
     }
 
+    /// True when the slot at `index` is the last exercise of a Repeating Blocks cycle — the
+    /// rest immediately after it is the longer "between cycles" rest, not the short
+    /// between-exercise rest every other slot gets.
+    private func isLastSlotOfCycle(at index: Int, in routine: [Exercise], config: RepeatingBlocksConfig) -> Bool {
+        let position = exercisePosition(at: index, in: routine)
+        let superSetSize = max(1, config.blockDurations.count * config.exercisesPerBlock)
+        return position % superSetSize == superSetSize - 1
+    }
+
     // MARK: - Duration
 
     /// The duration the timer style dictates for this slot, ignoring any user override.
@@ -169,7 +178,11 @@ struct WorkoutTiming {
             // Blocks configures work only; its rest is derived by the shared ratio rather than
             // matching work 1:1 as it used to.
             let work = config.blockDurations[position.blockIndex]
-            return isRest ? Self.restSeconds(forWork: work) : work
+            guard isRest else { return work }
+            if let cycleRest = config.cycleRestSeconds, isLastSlotOfCycle(at: index, in: routine, config: config) {
+                return cycleRest
+            }
+            return Self.restSeconds(forWork: work)
 
         case .standard, .addOn, .addOnTakeAway:
             // Ladder styles vary which exercises run, not how long they run for.

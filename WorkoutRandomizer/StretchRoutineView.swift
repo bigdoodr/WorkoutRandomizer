@@ -24,6 +24,8 @@ private enum CategoryChip: Hashable {
 struct StretchRoutineView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var catalog = ExerciseCatalog.shared
+    @State private var favorites = FavoritesStore.shared
+    @State private var favoritesOnly = false
     @State private var selectedCategories: Set<String> = []
     @State private var holdDuration: Int = 20
     @State private var maxTotalMinutes: Int = 0   // 0 = no limit
@@ -154,6 +156,28 @@ struct StretchRoutineView: View {
                     Text("Time to hold each stretch per side")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                // Favorites — restrict the pool to starred stretches only
+                if !favorites.names.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle(isOn: $favoritesOnly) {
+                            HStack(spacing: 8) {
+                                Image(systemName: favoritesOnly ? "star.fill" : "star")
+                                    .foregroundStyle(.yellow)
+                                    .frame(width: 22)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Favorites Only")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                    Text("Only use stretches you've starred on the Exercises tab")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .toggleStyle(.switch)
+                    }
                 }
 
                 // Both sides mode
@@ -328,6 +352,10 @@ struct StretchRoutineView: View {
                 }
             }
         }
+        if favoritesOnly {
+            pool = pool.filter { favorites.isFavorite($0.name) }
+        }
+
         var result = isOrdered ? pool : pool.shuffled()
 
         if maxTotalMinutes > 0 {
@@ -613,6 +641,20 @@ struct StretchPlayerView: View {
                 if isPlaying { stopRoutine(); dismiss() }
             }
         }
+        // The Apple Watch tapped Pause/Resume — mirror it here so both devices agree
+        .onChange(of: connectivityManager.watchRequestedPause) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedPause = false
+                if isPlaying { togglePause() }
+            }
+        }
+        // The Apple Watch tapped Skip — advance one stretch on the iPhone too
+        .onChange(of: connectivityManager.watchRequestedSkip) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedSkip = false
+                if isPlaying { skipCurrent() }
+            }
+        }
 #endif
         .sheet(isPresented: $showingRecap) {
             StretchRecapView(
@@ -858,6 +900,9 @@ struct StretchPlayerView: View {
             NSSound.beep()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { NSSound.beep() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { NSSound.beep() }
+        case .enterActive, .enterCoolDown:
+            // Stretch routines have no warm-up/cool-down phase of their own to transition into.
+            break
         }
         return
 #endif
@@ -934,6 +979,9 @@ struct StretchPlayerView: View {
             case .warning:  (frequency, duration, bright, gain) = (1400, 0.10, true, 1.0)
             case .end:      (frequency, duration, bright, gain) = (523.25, 0.22, false, 0.95)
             case .complete: (frequency, duration, bright, gain) = (659.25, 0.18, true, 1.0)
+            // Stretch routines never emit these — no warm-up/cool-down phase here — but the
+            // switch must stay exhaustive since FeedbackEvent is shared with the main player.
+            case .enterActive, .enterCoolDown: (frequency, duration, bright, gain) = (880, 0.12, false, 0.9)
             }
 
             var buffers: [AVAudioPCMBuffer] = []
@@ -979,6 +1027,12 @@ struct StretchPlayerView: View {
         case .complete:
             let g = UINotificationFeedbackGenerator()
             g.prepare(); g.notificationOccurred(.success); generator = g
+        case .enterActive:
+            let g = UIImpactFeedbackGenerator(style: .heavy)
+            g.prepare(); g.impactOccurred(); generator = g
+        case .enterCoolDown:
+            let g = UIImpactFeedbackGenerator(style: .soft)
+            g.prepare(); g.impactOccurred(); generator = g
         }
         _ = generator
         #endif
@@ -993,6 +1047,8 @@ struct StretchPlayerView: View {
         case .warning: feedbackType = .warning
         case .end: feedbackType = .end
         case .complete: feedbackType = .complete
+        case .enterActive: feedbackType = .enterActive
+        case .enterCoolDown: feedbackType = .enterCoolDown
         }
         connectivityManager.sendFeedbackEvent(feedbackType)
         #endif

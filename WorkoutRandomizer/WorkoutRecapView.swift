@@ -31,6 +31,10 @@ struct WorkoutRecapView: View {
     let averageHeartRate: Double
     var hrZoneDurations: [(name: String, seconds: TimeInterval)] = []
     var intention: WorkoutIntention = .generalFitness
+    /// Which focus areas built this session. Used only to soften the HR-zone-match verdict
+    /// below — some focus areas (Core) are naturally low-impact on heart rate, and a "Low"
+    /// match there reflects the exercise, not the effort.
+    var selectedFocusAreas: Set<String> = []
     let onDismiss: () -> Void
 
     private var totalTime: Int { totalExerciseTime + totalRestTime }
@@ -41,6 +45,7 @@ struct WorkoutRecapView: View {
         case .fatBurn:         return [1, 2]
         case .cardioEndurance: return [2, 3]
         case .strengthPower:   return [3, 4]
+        case .hiit:            return [3, 4]
         }
     }
 
@@ -50,7 +55,20 @@ struct WorkoutRecapView: View {
         case .fatBurn:         return "Zones 2–3"
         case .cardioEndurance: return "Zones 3–4"
         case .strengthPower:   return "Zones 4–5"
+        case .hiit:            return "Zones 4–5"
         }
+    }
+
+    /// Focus areas whose exercises are expected to stay low-heart-rate even with real effort —
+    /// isometric/strength core work rarely reaches the aerobic zones the alignment score wants.
+    private static let lowCardioImpactAreas: Set<String> = ["Core", "Core: Strength"]
+
+    private var isLowCardioImpactFocus: Bool {
+        !selectedFocusAreas.isEmpty && selectedFocusAreas.isSubset(of: Self.lowCardioImpactAreas)
+    }
+
+    private var showsEffortAcknowledgment: Bool {
+        !hrZoneDurations.isEmpty && isLowCardioImpactFocus && alignmentFraction < 0.6
     }
 
     // Zones 4-5 are meant for short bursts, not the bulk of a session (standard HR
@@ -134,6 +152,19 @@ struct WorkoutRecapView: View {
                         if !hrZoneDurations.isEmpty {
                             RecapStatCard(title: intention.rawValue, value: "\(alignmentLabel)", icon: intention.icon, color: alignmentColor)
                         }
+                    }
+
+                    if showsEffortAcknowledgment {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(.teal)
+                            Text("Your HR-zone match is on the low side, but that's expected here — Core exercises are naturally low-impact on heart rate. It doesn't mean the effort wasn't real.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(12)
+                        .background(Color.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                     }
 
                     if isOverexerted {

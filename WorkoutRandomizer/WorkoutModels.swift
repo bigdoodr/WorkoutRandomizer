@@ -64,7 +64,11 @@ enum TimerStyle: String, CaseIterable, Identifiable {
 
 struct RepeatingBlocksConfig: Equatable {
     let exercisesPerBlock: Int
-    let blockDurations: [Int]   // work seconds per block; rest = same
+    let blockDurations: [Int]   // work seconds per block
+    /// Rest after the last exercise of a full cycle, before the next cycle starts — distinct
+    /// from the short rest between exercises within a cycle. Nil falls back to the same
+    /// derived-from-work rest every other slot uses, matching behavior before this existed.
+    var cycleRestSeconds: Int? = nil
 }
 
 enum WorkoutIntention: String, CaseIterable, Identifiable {
@@ -72,6 +76,10 @@ enum WorkoutIntention: String, CaseIterable, Identifiable {
     case fatBurn = "Fat Burn"
     case cardioEndurance = "Cardio Endurance"
     case strengthPower = "Strength / Power"
+    /// Short, near-maximal work with incomplete rest. Doesn't change which exercises are
+    /// picked — the "Cardio" focus area / quick filter still controls that — this only frames
+    /// the HR-zone targets and tips around anaerobic intervals rather than sustained effort.
+    case hiit = "HIIT"
     var id: String { rawValue }
 
     var icon: String {
@@ -80,6 +88,7 @@ enum WorkoutIntention: String, CaseIterable, Identifiable {
         case .fatBurn: return "flame"
         case .cardioEndurance: return "heart"
         case .strengthPower: return "bolt"
+        case .hiit: return "bolt.heart"
         }
     }
 
@@ -89,6 +98,7 @@ enum WorkoutIntention: String, CaseIterable, Identifiable {
         case .fatBurn: return .orange
         case .cardioEndurance: return .red
         case .strengthPower: return .blue
+        case .hiit: return .pink
         }
     }
 
@@ -108,11 +118,16 @@ enum WorkoutIntention: String, CaseIterable, Identifiable {
         case (.strengthPower, "Zone 2"): return "Steady circuit pace."
         case (.strengthPower, "Zone 3"): return "Good for circuit-style strength work."
         case (.strengthPower, "Zone 4"): return "Power endurance territory."
-        case (.strengthPower, "Zone 5"): return "Explosive power output. Great for HIIT."
+        case (.strengthPower, "Zone 5"): return "Explosive power output."
         case (.generalFitness, "Zone 1"): return "Good for warm-up or cool-down."
         case (.generalFitness, "Zone 2"): return "Steady-state cardio zone."
         case (.generalFitness, "Zone 3"): return "Moderate effort. Good overall fitness."
         case (.generalFitness, "Zone 4"): return "High intensity. Improving fitness quickly."
+        case (.hiit, "Zone 1"): return "Too easy for HIIT — this should be your rest interval, not your work interval."
+        case (.hiit, "Zone 2"): return "Still warming up. Push harder on the next work interval."
+        case (.hiit, "Zone 3"): return "Getting there — one more gear for a true HIIT effort."
+        case (.hiit, "Zone 4"): return "This is the target zone for HIIT work intervals."
+        case (.hiit, "Zone 5"): return "Max anaerobic effort — exactly what a short HIIT interval should feel like."
         default: return "Max effort. Use sparingly."
         }
     }
@@ -152,6 +167,41 @@ final class CustomExerciseStore {
 
     private func persist() {
         if let data = try? JSONEncoder().encode(exercises) {
+            UserDefaults.standard.set(data, forKey: Self.storageKey)
+        }
+    }
+}
+
+/// Names of exercises/stretches the user has starred, keyed by exercise name (matches how
+/// `Exercise` is looked up elsewhere — there's no stable id, just the catalog name).
+@MainActor
+@Observable
+final class FavoritesStore {
+    static let shared = FavoritesStore()
+    private static let storageKey = "favoriteExerciseNames_v1"
+
+    private(set) var names: Set<String> = []
+
+    private init() {
+        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
+           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            names = decoded
+        }
+    }
+
+    func isFavorite(_ name: String) -> Bool { names.contains(name) }
+
+    func toggle(_ name: String) {
+        if names.contains(name) {
+            names.remove(name)
+        } else {
+            names.insert(name)
+        }
+        persist()
+    }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(names) {
             UserDefaults.standard.set(data, forKey: Self.storageKey)
         }
     }

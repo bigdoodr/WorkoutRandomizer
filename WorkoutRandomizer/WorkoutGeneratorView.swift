@@ -30,6 +30,7 @@ struct WorkoutGeneratorView: View {
     /// When on, rest is derived from exercise duration instead of set by hand.
     @AppStorage("restLinkedToWork") private var restLinkedToWork = true
     @State private var restEvery = 1
+    @State private var shuffleExerciseTime = false
     @State private var generatedRoutine: [Exercise] = []
     @State private var showingWorkout = false
     @State private var isGenerating = false
@@ -66,15 +67,19 @@ struct WorkoutGeneratorView: View {
     private enum ActiveSheet: Identifiable, Equatable {
         case guide(TutorialView.Mode)
         case settings
+        case intentionInfo
 
         var id: String {
             switch self {
             case .guide(let mode): return "guide-\(mode.id)"
             case .settings: return "settings"
+            case .intentionInfo: return "intentionInfo"
             }
         }
     }
     @State private var customExerciseStore = CustomExerciseStore.shared
+    @State private var favorites = FavoritesStore.shared
+    @State private var favoritesOnly = false
     @State private var showCustomTimers = false
     @State private var exerciseDurationOverrides: [Int: Int] = [:]
     @State private var showSaveConfirmation = false
@@ -231,6 +236,15 @@ struct WorkoutGeneratorView: View {
     @State private var blockDurations: [Int] = [30, 25, 45]
     @State private var blocksTotalSets: Int = 2
     @State private var shuffleBlockSets: Bool = false
+    /// Linked (default): the rest between full cycles is the same derived value as the rest
+    /// after any other exercise — i.e. no change from before this existed. Manual: a longer,
+    /// hand-picked rest before the whole block of exercises repeats.
+    @State private var blocksCycleRestLinked: Bool = true
+    @State private var blocksCycleRestDuration: Int = 60
+    /// Off (default): an exercise keeps the same duration on both sides of the climb — the
+    /// exercise assigned to the first 20s rung is also the one at the mirrored 20s rung on the
+    /// way down. On: each rung gets its own independent pick, so that pairing isn't guaranteed.
+    @State private var shufflePyramidOrder: Bool = false
 
     /// Work + derived rest for one pass through every block.
     var blocksSuperSetSeconds: Int {
@@ -244,15 +258,24 @@ struct WorkoutGeneratorView: View {
         guard let lastWork = blockDurations.last else { return 0 }
         return WorkoutTiming.restSeconds(forWork: lastWork)
     }
+    /// The rest Blocks actually uses between full cycles: derived from the last block's work
+    /// while linked, the hand-picked value otherwise. Everything downstream — the timing
+    /// resolver and the length estimate below — must read this, never `blocksCycleRestDuration`.
+    var effectiveBlocksCycleRest: Int {
+        blocksCycleRestLinked ? blocksTrailingRestSeconds : blocksCycleRestDuration
+    }
     func blocksTotalSeconds(forSets sets: Int) -> Int {
-        max(0, sets * blocksSuperSetSeconds - blocksTrailingRestSeconds)
+        guard sets > 0 else { return 0 }
+        let workPerCycle = blockDurations.reduce(0) { $0 + exercisesPerBlock * $1 }
+        let intraRestPerCycle = blocksSuperSetSeconds - workPerCycle - blocksTrailingRestSeconds
+        let cycleGaps = max(0, sets - 1) * effectiveBlocksCycleRest
+        return max(0, sets * (workPerCycle + intraRestPerCycle) + cycleGaps)
     }
     var blocksAvailableTotalSets: [Int] {
-        let superSetSec = blocksSuperSetSeconds
-        guard superSetSec > 0 else { return [1] }
+        guard blocksSuperSetSeconds > 0 else { return [1] }
         var options: [Int] = []
         var n = 1
-        while n * superSetSec <= 90 * 60 { options.append(n); n += 1 }
+        while blocksTotalSeconds(forSets: n) <= 90 * 60 { options.append(n); n += 1 }
         return options.isEmpty ? [1] : options
     }
     var blocksTotalSeconds: Int { blocksTotalSeconds(forSets: blocksTotalSets) }
@@ -277,7 +300,11 @@ struct WorkoutGeneratorView: View {
             exerciseDuration: exerciseDuration,
             restDuration: effectiveRestDuration,
             blocksConfig: timerStyle == .blocks
-                ? RepeatingBlocksConfig(exercisesPerBlock: exercisesPerBlock, blockDurations: blockDurations)
+                ? RepeatingBlocksConfig(
+                    exercisesPerBlock: exercisesPerBlock,
+                    blockDurations: blockDurations,
+                    cycleRestSeconds: blocksTotalSets > 1 ? effectiveBlocksCycleRest : nil
+                  )
                 : nil,
             overrides: exerciseDurationOverrides,
             pyramidLadder: pyramidPlan.ladder
@@ -396,11 +423,40 @@ struct WorkoutGeneratorView: View {
                         }
                         .id("difficultySection")
 
+                        // Favorites — restrict the pool to starred exercises only
+                        if !favorites.names.isEmpty {
+                            Toggle(isOn: $favoritesOnly) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: favoritesOnly ? "star.fill" : "star")
+                                        .foregroundStyle(.yellow)
+                                        .frame(width: 22)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Favorites Only")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Text("Only use exercises you've starred on the Exercises tab")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .toggleStyle(.switch)
+                        }
+
                         // Intention — single-select icon chips
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Intention")
-                                .font(.title2)
-                                .fontWeight(.semibold)
+                            HStack(spacing: 6) {
+                                Text("Intention")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                                Button {
+                                    activeSheet = .intentionInfo
+                                } label: {
+                                    Image(systemName: "info.circle")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
 
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 10) {
                                 ForEach(WorkoutIntention.allCases) { intent in
@@ -464,6 +520,16 @@ struct WorkoutGeneratorView: View {
 
                             if timerStyle == .pyramid {
                                 pyramidExplainer
+
+                                Toggle(isOn: $shufflePyramidOrder) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Shuffle order")
+                                            .font(.subheadline)
+                                        Text("Without this, an exercise keeps the same duration on both sides of the climb")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                         }
 
@@ -514,6 +580,23 @@ struct WorkoutGeneratorView: View {
                                                     .buttonStyle(.plain)
                                                 }
                                                 Spacer()
+                                            }
+                                        }
+
+                                        // Shuffle Exercise Time — Standard only. Gives each work
+                                        // slot its own random pick from the same presets above
+                                        // instead of one fixed value for every exercise. The same
+                                        // result can already be built by hand with Custom Timers;
+                                        // this just automates it.
+                                        if timerStyle == .standard {
+                                            Toggle(isOn: $shuffleExerciseTime) {
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text("Shuffle Exercise Time")
+                                                        .font(.subheadline)
+                                                    Text("Each exercise gets its own random duration instead of one fixed length")
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
                                             }
                                         }
 
@@ -758,6 +841,51 @@ struct WorkoutGeneratorView: View {
                                                     .foregroundStyle(.secondary)
                                             }
                                         }
+
+                                        // Rest Between Cycles — the longer recovery before the
+                                        // whole block of exercises repeats, distinct from the
+                                        // short rest between exercises within one cycle.
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            HStack {
+                                                Text("Rest Between Cycles")
+                                                    .font(.subheadline)
+                                                Spacer()
+                                                Button {
+                                                    if blocksCycleRestLinked { blocksCycleRestDuration = effectiveBlocksCycleRest }
+                                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                                        blocksCycleRestLinked.toggle()
+                                                    }
+                                                } label: {
+                                                    HStack(spacing: 4) {
+                                                        Image(systemName: blocksCycleRestLinked ? "link" : "link.badge.plus")
+                                                        Text(blocksCycleRestLinked ? "Linked" : "Manual")
+                                                    }
+                                                    .font(.caption)
+                                                    .padding(.horizontal, 10)
+                                                    .padding(.vertical, 5)
+                                                    .background(blocksCycleRestLinked ? Color.blue : Color.gray.opacity(0.15))
+                                                    .foregroundStyle(blocksCycleRestLinked ? .white : .primary)
+                                                    .clipShape(Capsule())
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+
+                                            if blocksCycleRestLinked {
+                                                Text("\(effectiveBlocksCycleRest)s — same as the rest between exercises")
+                                                    .font(.subheadline)
+                                                    .fontWeight(.medium)
+                                                    .foregroundStyle(.secondary)
+                                            } else {
+                                                Stepper(value: $blocksCycleRestDuration, in: 5...300, step: 5) {
+                                                    HStack {
+                                                        Text("\(blocksCycleRestDuration)s")
+                                                            .font(.subheadline)
+                                                            .fontWeight(.medium)
+                                                        Spacer()
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -873,6 +1001,38 @@ struct WorkoutGeneratorView: View {
                                                     ) { EmptyView() }
                                                     .labelsHidden()
                                                 }
+                                            }
+
+                                            // Reorder/delete — disabled for ladder styles (Add-On,
+                                            // Add-On + Take Away), whose round structure is derived
+                                            // from the generated sequence itself and would desync
+                                            // from a manual edit.
+                                            if !timerStyle.isLadder {
+                                                HStack(spacing: 10) {
+                                                    Button {
+                                                        moveRoutineItem(at: index, offset: -1)
+                                                    } label: {
+                                                        Image(systemName: "chevron.up")
+                                                    }
+                                                    .disabled(index == 0)
+
+                                                    Button {
+                                                        moveRoutineItem(at: index, offset: 1)
+                                                    } label: {
+                                                        Image(systemName: "chevron.down")
+                                                    }
+                                                    .disabled(index == generatedRoutine.count - 1)
+
+                                                    Button(role: .destructive) {
+                                                        deleteRoutineItem(at: index)
+                                                    } label: {
+                                                        Image(systemName: "trash")
+                                                    }
+                                                }
+                                                .font(.caption)
+                                                .buttonStyle(.plain)
+                                                .foregroundStyle(.secondary)
+                                                .padding(.leading, 6)
                                             }
                                         }
                                         .padding(.vertical, 2)
@@ -1002,6 +1162,8 @@ struct WorkoutGeneratorView: View {
                 TutorialView(mode: mode)
             case .settings:
                 SettingsView(showGuideRequest: $showGuideRequest)
+            case .intentionInfo:
+                IntentionInfoView()
             }
         }
         .alert("Routine Saved", isPresented: $showSaveConfirmation) {
@@ -1184,6 +1346,10 @@ struct WorkoutGeneratorView: View {
                 }
             }
 
+            if favoritesOnly {
+                pool = pool.filter { favorites.isFavorite($0.name) }
+            }
+
             guard !pool.isEmpty else {
                 isGenerating = false
                 return
@@ -1250,7 +1416,17 @@ struct WorkoutGeneratorView: View {
                 // Previously the un-shuffled path fell through to `selected` unchanged, which
                 // is why it produced one long list of unique exercises instead of repeats.
                 let exercises: [Exercise]
-                if timerStyle == .blocks && blocksTotalSets > 1 {
+                if timerStyle == .pyramid && !shufflePyramidOrder {
+                    // Mirror the ascending half back down so an exercise keeps the same
+                    // duration on both sides of the climb, matching how the durations
+                    // themselves already mirror. Shuffle Order (below) skips this and lets
+                    // every rung get its own independent pick instead.
+                    let half = max(1, pyramidPlan.pass.count / 2)
+                    exercises = (0..<pyramidPlan.repeats).flatMap { _ -> [Exercise] in
+                        let ascending = Array(createBalancedRoutine(from: pool, maxCount: half).prefix(half))
+                        return ascending + ascending.reversed()
+                    }
+                } else if timerStyle == .blocks && blocksTotalSets > 1 {
                     // The base has to be *exactly* one set long. createBalancedRoutine can
                     // overshoot by one when its last pick is single-sided and both sides land,
                     // and repeating a base of the wrong length would push every later set's
@@ -1295,6 +1471,26 @@ struct WorkoutGeneratorView: View {
             }
 
             publish(routine: routine)
+            if timerStyle == .standard && shuffleExerciseTime {
+                applyShuffledExerciseTimes()
+                // Otherwise the preview shows a flat list with no visible sign anything
+                // was randomized — surface the per-exercise durations right away.
+                showCustomTimers = true
+            }
+        }
+    }
+
+    /// Gives each Standard-style work slot its own randomly-picked duration from the same
+    /// presets as the Exercise Duration chips, via the same override mechanism Custom Timers
+    /// uses — so this is just an automated version of hand-editing every slot. Rest keeps its
+    /// normal (linked-or-manual) behavior; only work varies. Runs after `publish(routine:)` so
+    /// it can key off `generatedRoutine`'s final indices rather than re-deriving the warm-up
+    /// offset itself.
+    private func applyShuffledExerciseTimes() {
+        let options = [20, 30, 45, 60]
+        for (index, exercise) in generatedRoutine.enumerated() {
+            guard !exercise.isPreparation, exercise.name != "Rest" else { continue }
+            exerciseDurationOverrides[index] = options.randomElement() ?? exerciseDuration
         }
     }
     
@@ -1620,5 +1816,102 @@ struct WorkoutGeneratorView: View {
         
         generatedRoutine = importedRoutine
         scrollToGeneratedToken = UUID()
+    }
+
+    /// Swaps two adjacent slots. Any Custom Timers overrides on either index move with their
+    /// slot, so a manually-set duration stays attached to the exercise it was set for.
+    private func moveRoutineItem(at index: Int, offset: Int) {
+        let target = index + offset
+        guard generatedRoutine.indices.contains(index), generatedRoutine.indices.contains(target) else { return }
+        generatedRoutine.swapAt(index, target)
+        let a = exerciseDurationOverrides.removeValue(forKey: index)
+        let b = exerciseDurationOverrides.removeValue(forKey: target)
+        if let b { exerciseDurationOverrides[index] = b }
+        if let a { exerciseDurationOverrides[target] = a }
+    }
+
+    /// Removes a slot and shifts every override above it down by one index so overrides stay
+    /// attached to the exercise they were set for rather than to a now-stale position.
+    private func deleteRoutineItem(at index: Int) {
+        guard generatedRoutine.indices.contains(index) else { return }
+        generatedRoutine.remove(at: index)
+        var reindexed: [Int: Int] = [:]
+        for (key, value) in exerciseDurationOverrides {
+            if key < index {
+                reindexed[key] = value
+            } else if key > index {
+                reindexed[key - 1] = value
+            }
+        }
+        exerciseDurationOverrides = reindexed
+    }
+}
+
+/// Explains what each Intention nudges you toward during a workout — which heart-rate zone it
+/// pushes you into and which focus areas it suits best — so the choice on the generator screen
+/// isn't a guess.
+private struct IntentionInfoView: View {
+    @Environment(\.dismiss) private var dismiss
+    private static let zones = ["Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5"]
+
+    private func bestFor(_ intention: WorkoutIntention) -> String {
+        switch intention {
+        case .generalFitness:
+            return "A balanced default that suits any focus area."
+        case .fatBurn:
+            return "Best with Cardio or full-body sessions — sustained moderate effort maximizes fat oxidation."
+        case .cardioEndurance:
+            return "Best with Cardio-heavy sessions and longer intervals — builds your aerobic base."
+        case .strengthPower:
+            return "Best with Upper/Lower/Core strength sessions and short, powerful efforts."
+        case .hiit:
+            return "Doesn't change which exercises are picked — pair it with the Cardio quick filter for the classic max-effort intervals."
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Each intention nudges the same routine toward a different heart-rate target and gives you a different tip per zone while you work out.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(WorkoutIntention.allCases) { intention in
+                    Section {
+                        HStack(spacing: 8) {
+                            Image(systemName: intention.icon)
+                                .foregroundStyle(intention.bannerColor)
+                            Text(intention.rawValue)
+                                .font(.headline)
+                        }
+                        Text(bestFor(intention))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        ForEach(Self.zones, id: \.self) { zone in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(zone)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(intention.bannerColor)
+                                    .frame(width: 52, alignment: .leading)
+                                Text(intention.tip(for: zone))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Intentions & HR Zones")
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }

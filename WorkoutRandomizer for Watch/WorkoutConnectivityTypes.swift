@@ -11,6 +11,10 @@ enum FeedbackType: String, Codable {
     case warning
     case end
     case complete
+    /// Warm-up finished, first work exercise starting.
+    case enterActive
+    /// Last work exercise finished, cool-down starting.
+    case enterCoolDown
 }
 
 enum ControlMessage: String, Codable {

@@ -386,9 +386,12 @@ private struct ExerciseRow: View {
     let entry: CatalogEntry
     let onPlay: () -> Void
 
+    @State private var favorites = FavoritesStore.shared
+
     var body: some View {
         let videoManager = VideoManager.shared
         let videoURL = videoManager.url(for: entry.exercise.name)
+        let isFavorite = favorites.isFavorite(entry.exercise.name)
 
         HStack {
             VStack(alignment: .leading, spacing: 4) {
@@ -399,6 +402,14 @@ private struct ExerciseRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                favorites.toggle(entry.exercise.name)
+            } label: {
+                Image(systemName: isFavorite ? "star.fill" : "star")
+                    .foregroundStyle(isFavorite ? .yellow : .secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isFavorite ? "Remove from Favorites" : "Add to Favorites")
             if videoURL != nil {
                 Button {
                     onPlay()

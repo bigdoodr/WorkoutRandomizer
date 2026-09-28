@@ -325,6 +325,31 @@ struct WorkoutWatchView: View {
                             .foregroundStyle(.green)
                     }
 
+                    // Pause/Resume + Skip — relayed to the iPhone, which owns the actual
+                    // timer state; the watch just asks it to flip pause or advance.
+                    if state.isPlaying {
+                        HStack(spacing: 20) {
+                            Button {
+                                connectivityManager.sendRequestPause()
+                            } label: {
+                                Image(systemName: state.isPaused ? "play.fill" : "pause.fill")
+                                    .font(.title3)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.blue)
+
+                            Button {
+                                connectivityManager.sendRequestSkip()
+                            } label: {
+                                Image(systemName: "forward.fill")
+                                    .font(.title3)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.orange)
+                        }
+                        .padding(.top, 6)
+                    }
+
                     // End Workout button - always visible when a workout is active
                     if sessionManager.isWorkoutActive {
                         Button(role: .destructive) {

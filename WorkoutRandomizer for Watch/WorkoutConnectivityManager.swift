@@ -88,6 +88,25 @@ class WorkoutConnectivityManager: NSObject, ObservableObject {
             print("Failed to send requestStop: \(error.localizedDescription)")
         }
     }
+
+    /// Asks the iPhone to toggle pause/resume on the active player. The watch doesn't
+    /// decide pause vs. resume itself — it just relays the tap, and the phone (the source
+    /// of truth for `isPlaying`/`isPaused`) flips its own state, same as tapping the
+    /// button there would.
+    func sendRequestPause() {
+        guard let session = session, session.isReachable else { return }
+        session.sendMessage(["type": "requestPause"], replyHandler: nil) { error in
+            print("Failed to send requestPause: \(error.localizedDescription)")
+        }
+    }
+
+    /// Asks the iPhone to skip to the next exercise/rest slot.
+    func sendRequestSkip() {
+        guard let session = session, session.isReachable else { return }
+        session.sendMessage(["type": "requestSkip"], replyHandler: nil) { error in
+            print("Failed to send requestSkip: \(error.localizedDescription)")
+        }
+    }
 }
 
 // MARK: - WCSessionDelegate
@@ -384,10 +403,12 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
     private func triggerWatchFeedback(_ event: FeedbackType) {
         let device = WKInterfaceDevice.current()
         switch event {
-        case .start:    device.play(.start)
-        case .warning:  device.play(.notification)
-        case .end:      device.play(.stop)
-        case .complete: device.play(.success)
+        case .start:         device.play(.start)
+        case .warning:       device.play(.notification)
+        case .end:           device.play(.stop)
+        case .complete:      device.play(.success)
+        case .enterActive:   device.play(.directionUp)
+        case .enterCoolDown: device.play(.directionDown)
         }
     }
 }

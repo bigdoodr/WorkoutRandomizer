@@ -17,11 +17,11 @@ enum SavedMoveType: String, Codable {
 struct SavedRoutineExercise: Identifiable, Codable {
     var id = UUID()
     let name: String
-    let duration: Int           // work/hold seconds per side
-    let restDuration: Int       // rest after exercise (or after each side if restAfterEachSide)
-    let singleSided: Bool
-    let restAfterEachSide: Bool // for single-sided: rest after L and after R separately
-    let moveType: SavedMoveType
+    var duration: Int           // work/hold seconds per side
+    var restDuration: Int       // rest after exercise (or after each side if restAfterEachSide)
+    var singleSided: Bool
+    var restAfterEachSide: Bool // for single-sided: rest after L and after R separately
+    var moveType: SavedMoveType
 
     init(
         name: String,
@@ -186,6 +186,7 @@ enum PreloadedRoutines {
 struct SavedRoutinesView: View {
     private let preloaded = PreloadedRoutines.all
     @State private var store = SavedRoutineStore.shared
+    @State private var showingBuilder = false
 
     var body: some View {
         List {
@@ -216,6 +217,18 @@ struct SavedRoutinesView: View {
             }
         }
         .navigationTitle("Saved Routines")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingBuilder = true
+                } label: {
+                    Label("Build Your Own", systemImage: "plus")
+                }
+            }
+        }
+        .sheet(isPresented: $showingBuilder) {
+            BuildYourOwnRoutineView()
+        }
     }
 }
 
@@ -603,6 +616,20 @@ struct SavedRoutinePlayerView: View {
                 if isPlaying { stopRoutine(); dismiss() }
             }
         }
+        // The Apple Watch tapped Pause/Resume — mirror it here so both devices agree
+        .onChange(of: connectivityManager.watchRequestedPause) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedPause = false
+                if isPlaying { togglePause() }
+            }
+        }
+        // The Apple Watch tapped Skip — advance one step on the iPhone too
+        .onChange(of: connectivityManager.watchRequestedSkip) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedSkip = false
+                if isPlaying { skipStep() }
+            }
+        }
 #endif
         .sheet(isPresented: $showingRecap) {
             SavedRoutineRecapView(routine: routine, onDismiss: { dismiss() })
@@ -825,6 +852,9 @@ struct SavedRoutinePlayerView: View {
             NSSound.beep()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { NSSound.beep() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { NSSound.beep() }
+        case .enterActive, .enterCoolDown:
+            // Saved routines have no warm-up/cool-down phase of their own to transition into.
+            break
         }
         return
 #endif
@@ -865,6 +895,9 @@ struct SavedRoutinePlayerView: View {
             case .warning:  (frequency, duration) = (1400, 0.10)
             case .end:      (frequency, duration) = (523.25, 0.22)
             case .complete: (frequency, duration) = (659.25, 0.18)
+            // Saved routines never emit these — no warm-up/cool-down phase here — but the
+            // switch must stay exhaustive since FeedbackEvent is shared with the main player.
+            case .enterActive, .enterCoolDown: (frequency, duration) = (880, 0.12)
             }
 
             let frames = AVAudioFrameCount(sampleRate * duration)
@@ -907,6 +940,12 @@ struct SavedRoutinePlayerView: View {
         case .complete:
             let g = UINotificationFeedbackGenerator()
             g.prepare(); g.notificationOccurred(.success)
+        case .enterActive:
+            let g = UIImpactFeedbackGenerator(style: .heavy)
+            g.prepare(); g.impactOccurred()
+        case .enterCoolDown:
+            let g = UIImpactFeedbackGenerator(style: .soft)
+            g.prepare(); g.impactOccurred()
         }
     #endif
 #endif

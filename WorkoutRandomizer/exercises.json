@@ -46,12 +46,33 @@
           "equipment": [
             "Chair/Box/Bench"
           ]
+        },
+        {
+          "name": "Hand Release Push-Ups",
+          "videoPath": "/resources/handReleasePushups.mp4",
+          "equipment": [
+            "None"
+          ]
         }
       ],
       "Expert/Advanced": [
         {
           "name": "One-Legged Skier Push-Ups",
           "videoPath": "/resources/onelegskierpushups.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Clapping Plyo Push-Ups",
+          "videoPath": "/resources/clappingPlyoPushups.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Superhuman Push-Ups",
+          "videoPath": "/resources/superhumanPushups.mp4",
           "equipment": [
             "None"
           ]
@@ -161,6 +182,16 @@
           "additionalCategories": [
             "Cardio"
           ]
+        },
+        {
+          "name": "Lateral Leaps and Tuck Jumps",
+          "videoPath": "/resources/lateralLeapsAndTuckJumps.mp4",
+          "equipment": [
+            "None"
+          ],
+          "additionalCategories": [
+            "Cardio"
+          ]
         }
       ],
       "Expert/Advanced": [
@@ -194,6 +225,13 @@
           "equipment": [
             "None"
           ]
+        },
+        {
+          "name": "Standing Alternating Reverse Lunges",
+          "videoPath": "/resources/altRevLungesStanding.mp4",
+          "equipment": [
+            "None"
+          ]
         }
       ],
       "Medium": [
@@ -204,6 +242,55 @@
             "Chair/Box/Bench"
           ],
           "singleSided": true
+        },
+        {
+          "name": "Alternating Reverse Lunge to Chest Opener",
+          "videoPath": "/resources/altRevLunge2ChestOpener.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "High Alternating Reverse Lunges",
+          "videoPath": "/resources/altRevLungesHigh.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Low Alternating Reverse Lunges",
+          "videoPath": "/resources/altRevLungesLow.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Hip Switch Ratchet Squats",
+          "videoPath": "/resources/hipSwitchRatchetSquats.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Squat to Curtsy Lunge",
+          "videoPath": "/resources/squat2CurtsyLunge.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Squat to Hip Opener",
+          "videoPath": "/resources/squat2HipOpener.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Squat to Knee Hold",
+          "videoPath": "/resources/squat2KneeHold.mp4",
+          "equipment": [
+            "None"
+          ]
         }
       ]
     },
@@ -230,6 +317,13 @@
         {
           "name": "Kneeling Spider-Man Push-Ups",
           "videoPath": "/resources/kneelingSpidermanPushups.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Shoulder Tap Pike Push-Ups",
+          "videoPath": "/resources/shoulderTapPikePushups.mp4",
           "equipment": [
             "None"
           ]
@@ -267,7 +361,7 @@
       "Hard": [
         {
           "name": "Diamond Push-Ups",
-          "videoPath": null,
+          "videoPath": "/resources/diamondPushups.mp4",
           "equipment": [
             "None"
           ]
@@ -339,6 +433,27 @@
           "equipment": [
             "None"
           ]
+        },
+        {
+          "name": "Ab Halos",
+          "videoPath": "/resources/abHalos.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Crunch and Reach Table Top",
+          "videoPath": "/resources/crunchAndReachTableTop.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Reverse Corkscrews",
+          "videoPath": "/resources/reverseCorkscrews.mp4",
+          "equipment": [
+            "None"
+          ]
         }
       ],
       "Hard": [
@@ -386,12 +501,26 @@
           "equipment": [
             "None"
           ]
+        },
+        {
+          "name": "Sprinter Sit-Ups",
+          "videoPath": "/resources/sprinterSitUps.mp4",
+          "equipment": [
+            "None"
+          ]
         }
       ],
       "Expert/Advanced": [
         {
           "name": "Twisting Piston Push-Ups",
           "videoPath": "/resources/twistingPistonPushUps.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Crunch and Reach Legs High",
+          "videoPath": "/resources/crunchAndReachLegsHigh.mp4",
           "equipment": [
             "None"
           ]
@@ -541,6 +670,29 @@
         {
           "name": "Skier Hops",
           "videoPath": "/resources/skierhops.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Ankle Tap Runs",
+          "videoPath": "/resources/ankleTapRuns.mp4",
+          "equipment": [
+            "None"
+          ]
+        }
+      ],
+      "Hard": [
+        {
+          "name": "Air Ball Ankle Juggle Run",
+          "videoPath": "/resources/airBallAnkleJuggleRun.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "High Knee Skier Hops",
+          "videoPath": "/resources/highKneeSkierHops.mp4",
           "equipment": [
             "None"
           ]
@@ -1226,6 +1378,14 @@
           "relatedFocusAreas": [
             "Shoulders"
           ]
+        },
+        {
+          "name": "Diagonal Hip Hinge to Tip Toe Reach",
+          "videoPath": "/resources/diagHipHinge2TipToeReach.mp4",
+          "equipment": [
+            "None"
+          ],
+          "isMovement": true
         }
       ]
     }

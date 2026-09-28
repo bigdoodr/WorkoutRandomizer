@@ -409,6 +409,20 @@ struct WorkoutPlayerView: View {
                 if isPlaying { stopWorkout(); dismiss() }
             }
         }
+        // The Apple Watch tapped Pause/Resume — mirror it here so both devices agree
+        .onChange(of: connectivityManager.watchRequestedPause) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedPause = false
+                if isPlaying { togglePause() }
+            }
+        }
+        // The Apple Watch tapped Skip — advance one slot on the iPhone too
+        .onChange(of: connectivityManager.watchRequestedSkip) { _, requested in
+            if requested {
+                connectivityManager.watchRequestedSkip = false
+                if isPlaying { skipExercise() }
+            }
+        }
 #endif
         .overlay {
             if let count = startCountdown {
@@ -455,6 +469,7 @@ struct WorkoutPlayerView: View {
                     #endif
                 }(),
                 intention: intention,
+                selectedFocusAreas: selectedFocusAreas,
                 onDismiss: {
                     showingRecap = false
                     dismiss()
@@ -543,6 +558,9 @@ struct WorkoutPlayerView: View {
                 NSSound.beep()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { NSSound.beep() }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { NSSound.beep() }
+            case .enterActive, .enterCoolDown:
+                // Distinct from the routine's own start/end: a single longer beep.
+                NSSound.beep()
             }
         }
         return
@@ -619,10 +637,12 @@ struct WorkoutPlayerView: View {
 
             let (frequency, duration, bright, gain): (Double, Double, Bool, Double)
             switch event {
-            case .start:    (frequency, duration, bright, gain) = (880, 0.12, false, 0.9)
-            case .warning:  (frequency, duration, bright, gain) = (1400, 0.10, true, 1.0)
-            case .end:      (frequency, duration, bright, gain) = (523.25, 0.22, false, 0.95)
-            case .complete: (frequency, duration, bright, gain) = (659.25, 0.18, true, 1.0)
+            case .start:        (frequency, duration, bright, gain) = (880, 0.12, false, 0.9)
+            case .warning:      (frequency, duration, bright, gain) = (1400, 0.10, true, 1.0)
+            case .end:          (frequency, duration, bright, gain) = (523.25, 0.22, false, 0.95)
+            case .complete:     (frequency, duration, bright, gain) = (659.25, 0.18, true, 1.0)
+            case .enterActive:  (frequency, duration, bright, gain) = (493.88, 0.12, true, 0.95)
+            case .enterCoolDown: (frequency, duration, bright, gain) = (659.25, 0.18, false, 0.85)
             }
 
             // Prepare buffers off-main
@@ -632,6 +652,20 @@ struct WorkoutPlayerView: View {
                 let freqs = [frequency, frequency * 1.2, frequency * 1.5]
                 for f in freqs {
                     if let buf = makeBuffer(freq: f, dur: 0.16, bright: true, gain: 1.0) {
+                        buffers.append(buf)
+                    }
+                }
+            case .enterActive:
+                // Two-note ascending chime — warm-up is over, work begins.
+                for f in [frequency, frequency * 1.335] {
+                    if let buf = makeBuffer(freq: f, dur: 0.12, bright: true, gain: 0.95) {
+                        buffers.append(buf)
+                    }
+                }
+            case .enterCoolDown:
+                // Two-note descending chime — settle into the cool-down.
+                for f in [frequency, frequency * 0.667] {
+                    if let buf = makeBuffer(freq: f, dur: 0.18, bright: false, gain: 0.85) {
                         buffers.append(buf)
                     }
                 }
@@ -671,6 +705,12 @@ struct WorkoutPlayerView: View {
         case .complete:
             let g = UINotificationFeedbackGenerator()
             g.prepare(); g.notificationOccurred(.success); generator = g
+        case .enterActive:
+            let g = UIImpactFeedbackGenerator(style: .heavy)
+            g.prepare(); g.impactOccurred(); generator = g
+        case .enterCoolDown:
+            let g = UIImpactFeedbackGenerator(style: .soft)
+            g.prepare(); g.impactOccurred(); generator = g
         }
         _ = generator // keep reference in scope
         #endif
@@ -701,6 +741,8 @@ struct WorkoutPlayerView: View {
         case .warning: feedbackType = .warning
         case .end: feedbackType = .end
         case .complete: feedbackType = .complete
+        case .enterActive: feedbackType = .enterActive
+        case .enterCoolDown: feedbackType = .enterCoolDown
         }
         connectivityManager.sendFeedbackEvent(feedbackType)
         #endif
@@ -779,7 +821,7 @@ struct WorkoutPlayerView: View {
         switch intention {
         case .strengthPower:
             return .functionalStrengthTraining
-        case .generalFitness, .fatBurn, .cardioEndurance:
+        case .generalFitness, .fatBurn, .cardioEndurance, .hiit:
             return .highIntensityIntervalTraining
         }
     }
@@ -883,10 +925,23 @@ struct WorkoutPlayerView: View {
 
         timeRemaining = durationForCurrentPosition
         prepareVideoForCurrentExercise(autoplay: true)
-        playFeedback(.start)
+        playFeedback(transitionFeedback(enteringIndex: currentIndex))
         sendWorkoutStateToWatch()
     }
-    
+
+    /// `.start` for an ordinary slot change; a distinct cue right at the seam between
+    /// warm-up and the first work exercise, or between the last work exercise and the
+    /// cool-down. Preparation slots (warm-up/cool-down, including the rest between
+    /// warm-up and work) are marked by `isPreparation`; a plain work/rest slot never is.
+    private func transitionFeedback(enteringIndex index: Int) -> FeedbackEvent {
+        guard index > 0, index < routine.count else { return .start }
+        let leaving = routine[index - 1].isPreparation
+        let entering = routine[index].isPreparation
+        if leaving && !entering { return .enterActive }
+        if !leaving && entering { return .enterCoolDown }
+        return .start
+    }
+
     private func togglePause() {
         isPaused.toggle()
         playFeedback(.warning)
@@ -1011,6 +1066,14 @@ struct WorkoutPlayerView: View {
             return IntentionBannerPayload(message: "Perfect pace — you're right where you want to be!", icon: "checkmark.circle.fill", tone: .positive)
         case (.generalFitness, "Zone 4"), (.generalFitness, "Zone 5"):
             return IntentionBannerPayload(message: "You're working hard — keep it up! 🔥", icon: "flame.fill", tone: .positive)
+
+        // HIIT
+        case (.hiit, "Zone 1"), (.hiit, "Zone 2"):
+            return IntentionBannerPayload(message: "That's rest-interval effort — go all-out on the next work interval!", icon: "arrow.up.circle.fill", tone: .nudgeUp)
+        case (.hiit, "Zone 3"):
+            return IntentionBannerPayload(message: "Closer — HIIT wants one more gear out of you!", icon: "arrow.up.circle.fill", tone: .nudgeUp)
+        case (.hiit, "Zone 4"), (.hiit, "Zone 5"):
+            return IntentionBannerPayload(message: "That's the HIIT effort you're after — max out this interval! ⚡️", icon: "bolt.heart.fill", tone: .positive)
 
         default:
             return nil
