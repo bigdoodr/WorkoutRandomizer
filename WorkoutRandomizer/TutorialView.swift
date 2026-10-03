@@ -62,39 +62,24 @@ struct TutorialView: View {
             icon: "sparkles", color: .indigo, since: "2.0", isReleaseOverview: true
         ),
         TutorialPage(
-            title: "Welcome!",
-            body: "Generate custom bodyweight workouts tailored to your focus areas, difficulty level, and available equipment.",
+            title: "Welcome & Your Goal",
+            body: "Generate custom bodyweight workouts tailored to your focus areas, difficulty, and equipment. Tell the app your goal — Fat Burn, Cardio Endurance, Strength, or General Fitness — and tap your HR Zone during a workout for tips matched to it.",
             icon: "figure.run", color: .blue, since: "1.0"
         ),
         TutorialPage(
-            title: "Getting Around",
-            body: "Five tabs along the bottom. Generate builds a workout. Exercises browses the whole catalog with demo videos. Stretch runs a stretch-only session. Saved holds curated routines and your own. My Exercises is for moves you add yourself.",
-            icon: "square.grid.2x2.fill", color: .cyan, since: "2.0"
-        ),
-        TutorialPage(
-            title: "Focus, Difficulty & Equipment",
-            body: "Tap the icon chips to choose which muscle groups to target — one or many. Difficulty is multi-select too, so a single session can mix Beginner and Medium. Tell the app what equipment you actually have and it only draws from moves you can do.",
+            title: "Customize Every Session",
+            body: "Tap the icon chips to choose focus areas — one or many. Difficulty is multi-select too, so a session can mix Beginner and Medium. Tell the app what equipment you have and it only draws from moves you can do. Prefer just stretching? The Stretch tab runs a hold-based session of its own, with video demos.",
             icon: "figure.mixed.cardio", color: .purple, since: "1.0"
         ),
         TutorialPage(
-            title: "Timer Styles",
-            body: "Standard runs a steady work/rest cycle. Pyramid ramps up and back down across the length you picked. Repeating Blocks cycles the same group of exercises. Add-On builds a ladder, each round repeating the last and adding a move. Add-On + Take Away climbs, then peels them back off. Rest is half the work interval, so 45 seconds of effort earns 20 back.",
+            title: "Getting Around & Settings",
+            body: "Five tabs along the bottom. Generate builds a workout. Exercises browses the whole catalog with demo videos. Stretch runs a stretch-only session. Saved holds curated routines and your own. My Exercises is for moves you add yourself. The gear button opens Settings, where video, sound, and haptics all stick between launches — and you can reopen this guide any time.",
+            icon: "square.grid.2x2.fill", color: .cyan, since: "2.0"
+        ),
+        TutorialPage(
+            title: "Timer & Pacing Options",
+            body: "Standard runs a steady work/rest cycle. Pyramid ramps up and back down across the length you picked. Repeating Blocks cycles the same group of exercises. Add-On builds a ladder; Add-On + Take Away climbs then peels back off. Switch on a warm-up or cool-down in the Generate tab — both drawn from stretches matching your focus. Need one exercise longer than the rest? Custom Timers lets you set any slot by hand, and it follows the routine everywhere — playback, Watch, and anything you save.",
             icon: "timer", color: .green, since: "2.0"
-        ),
-        TutorialPage(
-            title: "Warm-Up & Cool-Down",
-            body: "Switch either on in the Generate tab. The warm-up runs about a tenth of your session; the cool-down is a couple of longer holds at the end. Both are drawn from stretches that match the focus areas you chose, and neither one disturbs the timer pattern you picked.",
-            icon: "figure.flexibility", color: .mint, since: "2.0"
-        ),
-        TutorialPage(
-            title: "Custom Timers",
-            body: "Need one exercise longer than the rest? Tap Custom Timers after generating and set any slot by hand. Your edits follow the routine everywhere it goes — playback, the Apple Watch, and anything you save or export.",
-            icon: "slider.horizontal.3", color: .orange, since: "2.0"
-        ),
-        TutorialPage(
-            title: "Stretch Routine",
-            body: "The Stretch tab is completely separate from workouts. Set your hold duration, choose categories, and optionally cap the total time — no cardio-style rest intervals. Demo videos now play right in the stretch player too.",
-            icon: "figure.cooldown", color: .teal, since: "1.0"
         ),
         TutorialPage(
             title: "Saved & Shared Routines",
@@ -102,24 +87,9 @@ struct TutorialView: View {
             icon: "folder.fill", color: .brown, since: "1.4"
         ),
         TutorialPage(
-            title: "My Exercises",
-            body: "Add your own moves with a name, focus area, and difficulty. They join the pool the generator draws from and stay on your device between updates.",
-            icon: "person.badge.plus", color: .indigo, since: "1.3"
-        ),
-        TutorialPage(
-            title: "Audio, Video & Settings",
-            body: "Exercise videos stream by default over Wi-Fi or cellular. The gear button in the top right opens Settings, where you can pre-download them for offline use, turn video off entirely, and toggle sounds and haptics — all of which now stick between launches. Audio countdown cues play automatically, so set your phone to ring rather than silent. You can reopen this guide from Settings any time.",
-            icon: "play.rectangle.fill", color: .pink, since: "2.0"
-        ),
-        TutorialPage(
-            title: "Set Your Intention",
-            body: "Tell the app your goal — Fat Burn, Cardio Endurance, Strength, or General Fitness. During workouts, tap your HR Zone for personalized zone tips.",
-            icon: "flame", color: .orange, since: "1.0"
-        ),
-        TutorialPage(
-            title: "Live Stats & Recap",
-            body: "While a workout runs you get live exercise time, heart-rate zone, and burn type. When it ends, the recap shows total and working time, calories, peak and average heart rate — and if you wore your Watch, how long you spent in each zone.",
-            icon: "chart.bar.fill", color: .purple, since: "1.3"
+            title: "Track Your Progress",
+            body: "Add your own moves in My Exercises with a name, focus area, and difficulty — they join the pool the generator draws from. While a workout runs you get live exercise time, heart-rate zone, and burn type; the recap after shows total and working time, calories, and peak/average heart rate.",
+            icon: "chart.bar.fill", color: .mint, since: "1.3"
         ),
         TutorialPage(
             title: "Apple Watch",

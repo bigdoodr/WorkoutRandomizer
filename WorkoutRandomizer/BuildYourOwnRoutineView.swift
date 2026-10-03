@@ -30,6 +30,14 @@ struct BuildYourOwnRoutineView: View {
         "figure.flexibility", "star.fill", "bolt.fill", "flame.fill", "figure.run"
     ]
 
+    /// Longest a hold at each difficulty is realistically sustainable. Levels not listed
+    /// (Beginner, Medium) get no cap — this is about isometric holds getting harder to sustain
+    /// as difficulty rises, not a general duration limit.
+    private static let recommendedMaxHoldDuration: [String: Int] = [
+        "Hard": 90,
+        "Expert/Advanced": 45
+    ]
+
     private var canSave: Bool {
         !routineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !items.isEmpty
     }
@@ -187,8 +195,36 @@ struct BuildYourOwnRoutineView: View {
             if item.singleSided {
                 Toggle("Rest Between Sides", isOn: binding(for: index, \.restAfterEachSide))
             }
+
+            if let warning = durationWarning(for: item) {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
         .padding(.vertical, 4)
+    }
+
+    /// The difficulty level the exercise is cataloged under, checked against both the bundled
+    /// catalog and the user's own "My Exercises", or nil for an unrecognized name.
+    private func difficulty(for exerciseName: String) -> String? {
+        if let custom = customExerciseStore.exercises.first(where: { $0.name == exerciseName }) {
+            return custom.difficulty
+        }
+        for difficultyDict in catalog.exercises.values {
+            for (level, exercises) in difficultyDict where exercises.contains(where: { $0.name == exerciseName }) {
+                return level
+            }
+        }
+        return nil
+    }
+
+    private func durationWarning(for item: SavedRoutineExercise) -> String? {
+        guard item.moveType == .hold,
+              let level = difficulty(for: item.name),
+              let cap = Self.recommendedMaxHoldDuration[level],
+              item.duration > cap else { return nil }
+        return "\(level) holds are tough to sustain this long — consider a shorter duration or an easier variation."
     }
 
     /// A two-way binding into one field of `items[index]`, so Steppers/Toggles/Pickers in the

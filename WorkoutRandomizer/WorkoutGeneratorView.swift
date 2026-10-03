@@ -90,6 +90,7 @@ struct WorkoutGeneratorView: View {
 
     @StateObject private var videoManager = VideoManager.shared
     @State private var catalog = ExerciseCatalog.shared
+    @State private var hrZones = HRZoneSettings.shared
     @AppStorage("videoMode") private var videoModeRaw: String = VideoMode.stream.rawValue
     @State private var showVideoModePrompt = false
     @State private var downloadProgress: (completed: Int, total: Int)? = nil
@@ -1118,12 +1119,28 @@ struct WorkoutGeneratorView: View {
                     Button { activeSheet = .settings } label: {
                         Label("Settings", systemImage: "gearshape")
                             .labelStyle(.iconOnly)
+                            .overlay(alignment: .topTrailing) {
+                                if hrZones.isAgeMissing {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.yellow)
+                                        .offset(x: 8, y: -6)
+                                }
+                            }
                     }
                 }
 #else
                 ToolbarItem {
                     Button { activeSheet = .settings } label: {
                         Label("Settings", systemImage: "gearshape")
+                            .overlay(alignment: .topTrailing) {
+                                if hrZones.isAgeMissing {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.yellow)
+                                        .offset(x: 8, y: -6)
+                                }
+                            }
                     }
                 }
 #endif
@@ -1227,6 +1244,9 @@ struct WorkoutGeneratorView: View {
         }
         .task {
             await catalog.refresh()
+        }
+        .task {
+            await hrZones.refreshFromHealthKit()
         }
         .confirmationDialog("Select Video Mode", isPresented: $showVideoModePrompt, titleVisibility: .visible) {
             Button(VideoMode.downloadOnFirstLaunch.rawValue) {

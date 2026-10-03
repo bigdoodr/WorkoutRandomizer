@@ -26,11 +26,32 @@ struct SettingsView: View {
 
     @StateObject private var videoManager = VideoManager.shared
     @State private var downloadProgress: (completed: Int, total: Int)? = nil
+    @State private var hrZones = HRZoneSettings.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    NavigationLink {
+                        HRZonesSettingsView()
+                    } label: {
+                        HStack {
+                            Label("Heart Rate Zones", systemImage: "heart.text.square")
+                            if hrZones.isAgeMissing {
+                                Spacer()
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.yellow)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Health")
+                } footer: {
+                    Text("See how your age maps to heart-rate zones, or set them yourself.")
+                }
+
                 Section {
 #if os(iOS) || os(tvOS) || os(visionOS)
                     Toggle(isOn: $enableSound_iOS_tv_vision) {

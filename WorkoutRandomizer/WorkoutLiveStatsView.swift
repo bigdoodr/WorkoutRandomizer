@@ -27,25 +27,20 @@ struct WorkoutLiveStatsView: View {
     let heartRate: Double
     let hasWatchData: Bool
     let intention: WorkoutIntention
-    let maxHeartRate: Double
     var zoneThresholds: [Double] = []
 
     @State private var showingZonePopover = false
+    private var hrZones = HRZoneSettings.shared
+
+    /// The watch's own thresholds when a session has supplied them, else the shared
+    /// Settings-derived fallback (age-based, or a manual override).
+    private var effectiveThresholds: [Double] {
+        zoneThresholds.isEmpty ? hrZones.zoneBoundaries : zoneThresholds
+    }
 
     private var hrInfo: (zone: String, color: Color, nutrient: String) {
-        let idx: Int
-        if !zoneThresholds.isEmpty {
-            idx = zoneThresholds.firstIndex(where: { heartRate < $0 }) ?? zoneThresholds.count
-        } else {
-            let pct = heartRate / maxHeartRate
-            switch pct {
-            case ..<0.60:     idx = 0
-            case 0.60..<0.70: idx = 1
-            case 0.70..<0.80: idx = 2
-            case 0.80..<0.90: idx = 3
-            default:          idx = 4
-            }
-        }
+        let t = effectiveThresholds
+        let idx = t.firstIndex(where: { heartRate < $0 }) ?? t.count
         switch idx {
         case 0: return ("Zone 1", .green, "Active Recovery")
         case 1: return ("Zone 2", .yellow, "Fat Burn")
@@ -56,9 +51,7 @@ struct WorkoutLiveStatsView: View {
     }
 
     private func zoneBPMRange(index: Int) -> String {
-        let t = zoneThresholds.isEmpty
-            ? [maxHeartRate * 0.60, maxHeartRate * 0.70, maxHeartRate * 0.80, maxHeartRate * 0.90]
-            : zoneThresholds
+        let t = effectiveThresholds
         let lower = index > 0 && index - 1 < t.count ? Int(t[index - 1]) : nil
         let upper = index < t.count ? Int(t[index]) : nil
         switch (lower, upper) {
@@ -107,7 +100,7 @@ struct WorkoutLiveStatsView: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showingZonePopover) {
-                    HRZonePopoverView(zone: hrInfo.zone, color: hrInfo.color, intention: intention, maxHeartRate: maxHeartRate, zoneThresholds: zoneThresholds)
+                    HRZonePopoverView(zone: hrInfo.zone, color: hrInfo.color, intention: intention, zoneThresholds: zoneThresholds)
                 }
 
                 Divider().frame(height: 40)
@@ -138,13 +131,11 @@ private struct HRZonePopoverView: View {
     let zone: String
     let color: Color
     let intention: WorkoutIntention
-    let maxHeartRate: Double
     var zoneThresholds: [Double] = []
+    private var hrZones = HRZoneSettings.shared
 
     private func zoneBPMRange(index: Int) -> String {
-        let t = zoneThresholds.isEmpty
-            ? [maxHeartRate * 0.60, maxHeartRate * 0.70, maxHeartRate * 0.80, maxHeartRate * 0.90]
-            : zoneThresholds
+        let t = zoneThresholds.isEmpty ? hrZones.zoneBoundaries : zoneThresholds
         let lower = index > 0 && index - 1 < t.count ? Int(t[index - 1]) : nil
         let upper = index < t.count ? Int(t[index]) : nil
         switch (lower, upper) {

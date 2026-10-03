@@ -59,7 +59,6 @@ struct WorkoutPlayerView: View {
     @State private var intentionBannerTask: Task<Void, Never>? = nil
     @State private var lastBannerExerciseTime: Int = -1
     @State private var highIntensityStreakSeconds: Int = 0
-    @State private var userMaxHeartRate: Double = 185 // default: age 35
 #if canImport(AVFoundation)
     @State private var audioEngine: AVAudioEngine?
     @State private var playerNode: AVAudioPlayerNode?
@@ -211,12 +210,11 @@ struct WorkoutPlayerView: View {
                                 heartRate: connectivityManager.heartRate,
                                 hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
                                 intention: intention,
-                                maxHeartRate: userMaxHeartRate,
                                 zoneThresholds: connectivityManager.watchZoneThresholds
                             )
                             .padding(.top, 4)
                             #else
-                            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false, intention: intention, maxHeartRate: 185)
+                            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false, intention: intention)
                                 .padding(.top, 4)
                             #endif
                         }
@@ -385,7 +383,7 @@ struct WorkoutPlayerView: View {
             }
             prepareVideoForCurrentExercise(autoplay: false)
             #if canImport(HealthKit)
-            fetchUserMaxHeartRate()
+            Task { await HRZoneSettings.shared.refreshFromHealthKit() }
             #endif
             prepareWatchHandoff()
         }
@@ -811,12 +809,16 @@ struct WorkoutPlayerView: View {
         let flexibilityAreas: Set<String> = [
             "Morning Stretches", "Evening Recovery", "Cool Down", "Warm-Up: Hips", "Warm-Up: Full Body"
         ]
+        let cardioAreas: Set<String> = ["Cardio"]
 
         if !selectedFocusAreas.isEmpty && selectedFocusAreas.isSubset(of: coreAreas) {
             return .coreTraining
         }
         if !selectedFocusAreas.isEmpty && selectedFocusAreas.isSubset(of: flexibilityAreas) {
             return .flexibility
+        }
+        if !selectedFocusAreas.isEmpty && selectedFocusAreas.isSubset(of: cardioAreas) {
+            return .mixedCardio
         }
         switch intention {
         case .strengthPower:
@@ -875,7 +877,7 @@ struct WorkoutPlayerView: View {
                         && currentExerciseTime % 30 == 0
                         && currentExerciseTime != lastBannerExerciseTime {
                         lastBannerExerciseTime = currentExerciseTime
-                        let zone = hrZoneName(bpm: hr, maxHR: userMaxHeartRate)
+                        let zone = hrZoneName(bpm: hr)
                         if zone == "Zone 4" || zone == "Zone 5" {
                             highIntensityStreakSeconds += 30
                         } else {
@@ -977,25 +979,7 @@ struct WorkoutPlayerView: View {
         #endif
     }
 
-    #if canImport(HealthKit)
-    private func fetchUserMaxHeartRate() {
-        let healthStore = HKHealthStore()
-        guard HKHealthStore.isHealthDataAvailable() else { return }
-        do {
-            let components = try healthStore.dateOfBirthComponents()
-            if let year = components.year {
-                let age = Calendar.current.component(.year, from: Date()) - year
-                if age > 10 && age < 120 {
-                    userMaxHeartRate = 220.0 - Double(age)
-                }
-            }
-        } catch {
-            // Keep the default (assumes age 35)
-        }
-    }
-    #endif
-
-    private func hrZoneName(bpm: Double, maxHR: Double) -> String {
+    private func hrZoneName(bpm: Double) -> String {
         #if os(iOS)
         let thresholds = connectivityManager.watchZoneThresholds
         if !thresholds.isEmpty {
@@ -1003,14 +987,7 @@ struct WorkoutPlayerView: View {
             return "Zone \(idx + 1)"
         }
         #endif
-        let pct = bpm / maxHR
-        switch pct {
-        case ..<0.60:       return "Zone 1"
-        case 0.60..<0.70:   return "Zone 2"
-        case 0.70..<0.80:   return "Zone 3"
-        case 0.80..<0.90:   return "Zone 4"
-        default:             return "Zone 5"
-        }
+        return HRZoneSettings.shared.zoneName(forHeartRate: bpm)
     }
 
     // Zones 4-5 are meant for short bursts (per standard HR zone guidance: Zone 5 is
@@ -1020,7 +997,7 @@ struct WorkoutPlayerView: View {
     private let highIntensitySafetyThresholdSeconds = 180
 
     private func intentionBannerPayload(hr: Double) -> IntentionBannerPayload? {
-        let zone = hrZoneName(bpm: hr, maxHR: userMaxHeartRate)
+        let zone = hrZoneName(bpm: hr)
 
         if (zone == "Zone 4" || zone == "Zone 5")
             && highIntensityStreakSeconds >= highIntensitySafetyThresholdSeconds {

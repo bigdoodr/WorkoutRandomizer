@@ -968,7 +968,7 @@ struct SavedRoutinePlayerView: View {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         let store = HKHealthStore()
         let configuration = HKWorkoutConfiguration()
-        configuration.activityType = .flexibility
+        configuration.activityType = routine.id == PreloadedRoutines.absWorkout.id ? .coreTraining : .flexibility
         configuration.locationType = .indoor
         store.startWatchApp(with: configuration) { success, error in
             if let error = error {
