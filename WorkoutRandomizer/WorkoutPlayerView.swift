@@ -68,6 +68,10 @@ struct WorkoutPlayerView: View {
     @State private var avPlayer: AVPlayer? = nil
     @State private var playerEndObserver: Any? = nil
     @Environment(\.dismiss) private var dismiss
+    // Regular width signals an iPad-sized (or iPhone Duo inner-display-sized) layout — this is
+    // the recommended way to size up, rather than checking device idiom directly, since it also
+    // covers the inner display of a dual-screen iPhone.
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     
     var currentExercise: Exercise? {
         guard currentIndex < routine.count else { return nil }
@@ -126,7 +130,7 @@ struct WorkoutPlayerView: View {
             GeometryReader { proxy in
                 let isLandscape = proxy.size.width > proxy.size.height
                 #if os(iOS)
-                let videoMaxH: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 240 : (isLandscape ? 110 : 180)
+                let videoMaxH: CGFloat = horizontalSizeClass == .regular ? 240 : (isLandscape ? 110 : 180)
                 #else
                 let videoMaxH: CGFloat = 220
                 #endif

@@ -17,6 +17,10 @@ struct RootTabView: View {
     /// catalog instance, and a remote refresh updates every tab at once.
     @State private var catalog = ExerciseCatalog.shared
     @State private var selection: AppTab = .generator
+    // Regular width means an iPad-sized layout, or the inner display of a dual-screen iPhone —
+    // both want the sidebar. iPhone's outer display and a folded dual-screen iPhone are compact
+    // and keep the familiar bottom tab bar.
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     enum AppTab: Hashable {
         case generator, allExercises, stretch, saved, myExercises
@@ -59,10 +63,33 @@ struct RootTabView: View {
                 }
             }
         }
-        // A five-item bottom bar is an iPhone idiom. On the Mac and iPad this turns the same
-        // tabs into a sidebar, which is what those platforms expect.
+        // A five-item bottom bar is the compact-width idiom. On the Mac, iPad, and the inner
+        // display of a dual-screen iPhone, the same tabs become a sidebar instead.
+        //
+        // iPadOS already morphs sidebarAdaptable between a top bar and a sidebar on its own as
+        // its size class changes, so defaultTabBarPlacement below has no effect there. iPhone —
+        // including a dual-screen iPhone's inner/outer displays — only ever shows one fixed
+        // representation at a time, so it needs to be told explicitly which one to use.
         #if os(macOS)
         .tabViewStyle(.sidebarAdaptable)
+        #elseif os(iOS)
+        .tabViewStyle(.sidebarAdaptable)
+        .applyingDefaultTabBarPlacement(horizontalSizeClass: horizontalSizeClass)
         #endif
     }
 }
+
+#if os(iOS)
+private extension View {
+    /// `defaultTabBarPlacement` ships in iOS 27 alongside dual-screen iPhone support; this app's
+    /// deployment target predates it, so fall back to the plain bottom tab bar on older iOS.
+    @ViewBuilder
+    func applyingDefaultTabBarPlacement(horizontalSizeClass: UserInterfaceSizeClass?) -> some View {
+        if #available(iOS 27.0, *) {
+            self.defaultTabBarPlacement(horizontalSizeClass == .regular ? .sidebar : .tabBar)
+        } else {
+            self
+        }
+    }
+}
+#endif
