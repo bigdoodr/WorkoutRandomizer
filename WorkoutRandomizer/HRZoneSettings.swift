@@ -142,7 +142,17 @@ final class HRZoneSettings {
             try await store.requestAuthorization(toShare: [], read: [dobType])
             let components = try store.dateOfBirthComponents()
             if let year = components.year {
-                let age = Calendar.current.component(.year, from: Date()) - year
+                // Subtracting years alone counts anyone who hasn't had this year's birthday yet
+                // as a year older than they are. Use the full birth date when Health provides
+                // month/day so the age only ticks over on the actual birthday.
+                let age: Int
+                if let month = components.month, let day = components.day,
+                   let birthDate = Calendar.current.date(from: DateComponents(year: year, month: month, day: day)) {
+                    age = Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year
+                        ?? (Calendar.current.component(.year, from: Date()) - year)
+                } else {
+                    age = Calendar.current.component(.year, from: Date()) - year
+                }
                 if age > 10, age < 120 {
                     healthAgeStatus = .authorized(age: age)
                 } else {
