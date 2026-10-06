@@ -67,7 +67,7 @@ struct HRZonesSettingsView: View {
             } header: {
                 Text("Heart Rate Zones")
             } footer: {
-                Text("Zones 1 through 5 are estimated from your max heart rate (220 minus age) and are what the app uses to classify your heart rate during a workout when your Apple Watch hasn't already supplied its own zones.")
+                zonesFooterText
             }
 
             Section {
@@ -108,7 +108,7 @@ struct HRZonesSettingsView: View {
             } header: {
                 Text("Zone Boundaries")
             } footer: {
-                Text("Set the bpm where each zone ends and the next begins, instead of using the calculated percentages of your max heart rate.")
+                Text("Set the bpm where each zone ends and the next begins, instead of using the calculated percentages of your max heart rate. Note: if your Apple Watch already has its own Heart Rate Zones set up, the Watch uses those during a workout instead of this override.")
             }
         }
         .navigationTitle("Heart Rate Zones")
@@ -141,6 +141,18 @@ struct HRZonesSettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var zonesFooterText: some View {
+        switch hrZones.boundarySource {
+        case .watch:
+            Text("These boundaries were last synced from your Apple Watch's own Heart Rate Zones — since your Watch already has zones configured, it uses those during a workout instead of the calculated estimate (or any custom boundaries set below).")
+        case .custom:
+            Text("Zones 1 through 5 use the custom boundaries you set below.")
+        case .calculated:
+            Text("Zones 1 through 5 are estimated from your max heart rate (220 minus age) and are what the app uses to classify your heart rate during a workout when your Apple Watch hasn't already supplied its own zones.")
+        }
+    }
+
     private var restingRangeText: String {
         if let resting = hrZones.restingHeartRate {
             return "~\(Int(resting)) bpm (from Health)"
@@ -149,7 +161,7 @@ struct HRZonesSettingsView: View {
     }
 
     private func zoneRangeText(_ index: Int) -> String {
-        let boundaries = hrZones.zoneBoundaries
+        let boundaries = hrZones.displayBoundaries
         let lower = index > 0 ? Int(boundaries[index - 1]) : nil
         let upper = index < boundaries.count ? Int(boundaries[index]) : nil
         switch (lower, upper) {

@@ -60,11 +60,26 @@ final class HRZoneSettings {
         didSet { defaults.set(customBoundaries, forKey: Keys.customBoundaries) }
     }
 
+    /// The four boundaries last reported by Apple Watch's own HKWorkoutZoneConfiguration, synced
+    /// over from a workout session. When present, this is what the Watch actually enforces live —
+    /// it ignores this app's calculated or custom boundaries entirely — so it takes priority for
+    /// display purposes even though it isn't used by `zoneBoundaries`' fallback math below.
+    private(set) var watchZoneThresholds: [Double]? {
+        didSet {
+            if let watchZoneThresholds {
+                defaults.set(watchZoneThresholds, forKey: Keys.watchZoneThresholds)
+            } else {
+                defaults.removeObject(forKey: Keys.watchZoneThresholds)
+            }
+        }
+    }
+
     private let defaults = UserDefaults.standard
     private enum Keys {
         static let manualAge = "hrZone_manualAgeOverride"
         static let useCustomBoundaries = "hrZone_useCustomBoundaries"
         static let customBoundaries = "hrZone_customBoundaries"
+        static let watchZoneThresholds = "hrZone_watchThresholds"
     }
 
     private init() {
@@ -76,11 +91,42 @@ final class HRZoneSettings {
         } else {
             customBoundaries = []
         }
+        if let stored = defaults.array(forKey: Keys.watchZoneThresholds) as? [Double], stored.count == 4 {
+            watchZoneThresholds = stored
+        } else {
+            watchZoneThresholds = nil
+        }
         // self is fully initialized now, so calculatedBoundaries (which reads effectiveAge) is
         // safe to call — give the editor sensible starting values when nothing is stored yet.
         if customBoundaries.count != 4 {
             customBoundaries = calculatedBoundaries
         }
+    }
+
+    /// Records the boundaries Apple Watch just reported for a workout, so the Settings screen can
+    /// keep showing them even after the session ends.
+    func updateWatchZoneThresholds(_ thresholds: [Double]) {
+        guard thresholds.count == 4 else { return }
+        watchZoneThresholds = thresholds.sorted()
+    }
+
+    enum BoundarySource: Equatable {
+        case watch
+        case custom
+        case calculated
+    }
+
+    /// Where `displayBoundaries` below is actually coming from — drives the explanatory copy in
+    /// Settings.
+    var boundarySource: BoundarySource {
+        if watchZoneThresholds != nil { return .watch }
+        return useCustomBoundaries ? .custom : .calculated
+    }
+
+    /// The boundaries to show the user: Apple Watch's real, already-active zones when we know
+    /// them, else whatever `zoneBoundaries` would compute.
+    var displayBoundaries: [Double] {
+        watchZoneThresholds ?? zoneBoundaries
     }
 
     /// The age actually driving the max-HR formula: a manual override first, then what Health

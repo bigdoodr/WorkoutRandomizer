@@ -267,6 +267,9 @@ class WorkoutConnectivityManager: ObservableObject {
     nonisolated func receiveZoneThresholds(_ thresholds: [Double]) {
         Task { @MainActor in
             self.watchZoneThresholds = thresholds
+            // Persist alongside the live value so Settings can keep showing the Watch's real
+            // zones after the workout ends, not just while this session is active.
+            HRZoneSettings.shared.updateWatchZoneThresholds(thresholds)
         }
     }
 }
