@@ -563,7 +563,12 @@ struct WorkoutGeneratorView: View {
                                     }
 
                                     if timerStyle != .pyramid {
-                                        // Exercise Duration presets
+                                        // Exercise Duration presets, with Shuffle Exercise Time
+                                        // (Standard only) sharing the same row — it picks a
+                                        // random value from these same presets per exercise
+                                        // instead of one fixed length for every exercise. The
+                                        // same result can already be built by hand with Custom
+                                        // Timers; this just automates it.
                                         VStack(alignment: .leading, spacing: 8) {
                                             Text("Exercise Duration")
                                                 .font(.subheadline)
@@ -581,23 +586,19 @@ struct WorkoutGeneratorView: View {
                                                     .buttonStyle(.plain)
                                                 }
                                                 Spacer()
-                                            }
-                                        }
-
-                                        // Shuffle Exercise Time — Standard only. Gives each work
-                                        // slot its own random pick from the same presets above
-                                        // instead of one fixed value for every exercise. The same
-                                        // result can already be built by hand with Custom Timers;
-                                        // this just automates it.
-                                        if timerStyle == .standard {
-                                            Toggle(isOn: $shuffleExerciseTime) {
-                                                VStack(alignment: .leading, spacing: 2) {
-                                                    Text("Shuffle Exercise Time")
-                                                        .font(.subheadline)
-                                                    Text("Each exercise gets its own random duration instead of one fixed length")
-                                                        .font(.caption)
-                                                        .foregroundStyle(.secondary)
+                                                if timerStyle == .standard {
+                                                    Toggle(isOn: $shuffleExerciseTime) {
+                                                        Text("Shuffle")
+                                                            .font(.subheadline)
+                                                    }
+                                                    .toggleStyle(.switch)
+                                                    .fixedSize()
                                                 }
+                                            }
+                                            if timerStyle == .standard {
+                                                Text("Shuffle Exercise Time: each exercise gets its own random duration instead of one fixed length")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
                                             }
                                         }
 
@@ -1418,7 +1419,24 @@ struct WorkoutGeneratorView: View {
                 // reusing this base rather than by drawing more exercises.
                 maxExercises = blocksCount * exercisesPerBlock
             case .standard:
-                let fullCycle = Double(exerciseDuration) + (Double(effectiveRestDuration) / Double(restEvery))
+                // When shuffling, no single exercise duration describes the routine, so the
+                // slot count is sized off the average of the same presets the shuffle draws
+                // from — otherwise the routine was sized for a fixed, unshuffled length and
+                // ran short or long of the selected Total Duration once shuffle picked bigger
+                // or smaller values.
+                let workSeconds: Double
+                let restSeconds: Double
+                if shuffleExerciseTime {
+                    let options = Self.shuffleExerciseDurationOptions
+                    workSeconds = Double(options.reduce(0, +)) / Double(options.count)
+                    restSeconds = restLinkedToWork
+                        ? Double(options.map { WorkoutTiming.restSeconds(forWork: $0) }.reduce(0, +)) / Double(options.count)
+                        : Double(effectiveRestDuration)
+                } else {
+                    workSeconds = Double(exerciseDuration)
+                    restSeconds = Double(effectiveRestDuration)
+                }
+                let fullCycle = workSeconds + (restSeconds / Double(restEvery))
                 let totalSecs = Double(totalDuration) * 60
                 maxExercises = Int(ceil(totalSecs / fullCycle))
             case .addOn, .addOnTakeAway:
@@ -1502,14 +1520,22 @@ struct WorkoutGeneratorView: View {
 
     /// Gives each Standard-style work slot its own randomly-picked duration from the same
     /// presets as the Exercise Duration chips, via the same override mechanism Custom Timers
-    /// uses — so this is just an automated version of hand-editing every slot. Rest keeps its
-    /// normal (linked-or-manual) behavior; only work varies. Runs after `publish(routine:)` so
+    /// uses — so this is just an automated version of hand-editing every slot. When rest is
+    /// Linked, each rest slot is re-derived from the shuffled work value that precedes it
+    /// (rather than the global Exercise Duration) so it still shows as half that slot's work;
+    /// a Manual rest keeps the hand-picked value untouched. Runs after `publish(routine:)` so
     /// it can key off `generatedRoutine`'s final indices rather than re-deriving the warm-up
     /// offset itself.
     private func applyShuffledExerciseTimes() {
-        let options = [20, 30, 45, 60]
+        let options = Self.shuffleExerciseDurationOptions
         for (index, exercise) in generatedRoutine.enumerated() {
-            guard !exercise.isPreparation, exercise.name != "Rest" else { continue }
+            if exercise.name == "Rest" {
+                if restLinkedToWork, index > 0, let precedingWork = exerciseDurationOverrides[index - 1] {
+                    exerciseDurationOverrides[index] = WorkoutTiming.restSeconds(forWork: precedingWork)
+                }
+                continue
+            }
+            guard !exercise.isPreparation else { continue }
             exerciseDurationOverrides[index] = options.randomElement() ?? exerciseDuration
         }
     }
@@ -1552,6 +1578,8 @@ struct WorkoutGeneratorView: View {
     private static let warmUpSecondsPerMove = 30
     private static let coolDownSecondsPerHold = 30
     private static let coolDownHoldCount = 2
+    /// Shuffle Exercise Time draws from the same presets as the Exercise Duration chips.
+    private static let shuffleExerciseDurationOptions = [20, 30, 45, 60]
 
     /// Every stretch belonging to the given categories, whether by its own focus area or by
     /// cross-tag, deduplicated by name.
