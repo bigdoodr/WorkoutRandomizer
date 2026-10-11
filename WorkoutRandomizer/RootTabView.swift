@@ -22,6 +22,12 @@ struct RootTabView: View {
     // and keep the familiar bottom tab bar.
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    // Shared across every tab: swiping or long-pressing an exercise in Exercises/My Exercises
+    // appends here, and this mini-player-style bar (shown above the tab bar) opens the builder
+    // pre-loaded with whatever's queued. See BuildYourOwnRoutineView.swift.
+    @State private var queue = RoutineBuilderQueue.shared
+    @State private var showingBuilder = false
+
     enum AppTab: Hashable {
         case generator, allExercises, stretch, saved, myExercises
     }
@@ -31,6 +37,7 @@ struct RootTabView: View {
             // The generator supplies its own NavigationStack already.
             Tab("Generate", systemImage: "figure.mixed.cardio", value: AppTab.generator) {
                 WorkoutGeneratorView()
+                    .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
 
             // The remaining four were only ever pushed from the generator, so none of them
@@ -40,18 +47,21 @@ struct RootTabView: View {
                 NavigationStack {
                     ExercisesView(exercisesByArea: catalog.exercises)
                 }
+                .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
 
             Tab("Stretch", systemImage: "figure.cooldown", value: AppTab.stretch) {
                 NavigationStack {
                     StretchRoutineView()
                 }
+                .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
 
             Tab("Saved", systemImage: "folder.fill", value: AppTab.saved) {
                 NavigationStack {
                     SavedRoutinesView()
                 }
+                .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
 
             Tab("My Exercises", systemImage: "person.badge.plus", value: AppTab.myExercises) {
@@ -61,6 +71,7 @@ struct RootTabView: View {
                         difficulties: catalog.difficulties
                     )
                 }
+                .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
         }
         // A five-item bottom bar is the compact-width idiom. On the Mac, iPad, and the inner
@@ -75,7 +86,12 @@ struct RootTabView: View {
         #elseif os(iOS)
         .tabViewStyle(.sidebarAdaptable)
         .applyingDefaultTabBarPlacement(horizontalSizeClass: horizontalSizeClass)
+        .applyingQueueBarAccessory(queue: queue, showingBuilder: $showingBuilder)
         #endif
+        .sensoryFeedback(.success, trigger: queue.items.count)
+        .sheet(isPresented: $showingBuilder) {
+            BuildYourOwnRoutineView()
+        }
     }
 }
 
@@ -91,5 +107,47 @@ private extension View {
             self
         }
     }
+
+    /// `tabViewBottomAccessory` ships in iOS 26.1 as the same system slot Music/Podcasts use for
+    /// their mini-player, shown above the tab bar. On older iOS, each tab's own content falls
+    /// back to a plain `safeAreaInset` bar instead (`applyingQueueBarFallback` below).
+    @ViewBuilder
+    func applyingQueueBarAccessory(queue: RoutineBuilderQueue, showingBuilder: Binding<Bool>) -> some View {
+        if #available(iOS 26.1, *) {
+            self.tabViewBottomAccessory(isEnabled: !queue.items.isEmpty) {
+                RoutineQueueBar(queue: queue) { showingBuilder.wrappedValue = true }
+            }
+        } else {
+            self
+        }
+    }
 }
 #endif
+
+private extension View {
+    /// Pre-iOS-26.1 and macOS have no system bottom-accessory slot, so the queue bar is pinned
+    /// to each tab's own content via `safeAreaInset` instead — applying it to the `TabView`
+    /// itself would place the bar underneath the tab bar/sidebar rather than above it.
+    @ViewBuilder
+    func applyingQueueBarFallback(queue: RoutineBuilderQueue, showingBuilder: Binding<Bool>) -> some View {
+        #if os(iOS)
+        if #available(iOS 26.1, *) {
+            self
+        } else {
+            safeAreaInset(edge: .bottom) {
+                if !queue.items.isEmpty {
+                    RoutineQueueBar(queue: queue) { showingBuilder.wrappedValue = true }
+                        .background(.bar)
+                }
+            }
+        }
+        #else
+        safeAreaInset(edge: .bottom) {
+            if !queue.items.isEmpty {
+                RoutineQueueBar(queue: queue) { showingBuilder.wrappedValue = true }
+                    .background(.bar)
+            }
+        }
+        #endif
+    }
+}

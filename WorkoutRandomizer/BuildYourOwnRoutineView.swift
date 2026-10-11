@@ -9,17 +9,62 @@
 
 import SwiftUI
 
+/// The exercises queued for "Build Your Own," shared across the Exercises, My Exercises, and
+/// builder tabs — swiping or long-pressing a row anywhere appends here, and the builder (and
+/// the mini-player-style queue bar) both read from the same instance.
+@MainActor
+@Observable
+final class RoutineBuilderQueue {
+    static let shared = RoutineBuilderQueue()
+    private static let storageKey = "routineBuilderQueue_v1"
+
+    var items: [SavedRoutineExercise] = [] {
+        didSet { persist() }
+    }
+
+    private init() {
+        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
+           let decoded = try? JSONDecoder().decode([SavedRoutineExercise].self, from: data) {
+            items = decoded
+        }
+    }
+
+    /// isStretch seeds a Hold default at 20s with no rest; a regular exercise seeds a Move
+    /// default at 30s/10s rest. Either can be changed afterward in the builder row.
+    func add(name: String, singleSided: Bool, isStretch: Bool) {
+        items.append(SavedRoutineExercise(
+            name: name,
+            duration: isStretch ? 20 : 30,
+            restDuration: isStretch ? 0 : 10,
+            singleSided: singleSided,
+            restAfterEachSide: false,
+            moveType: isStretch ? .hold : .move
+        ))
+    }
+
+    func clear() {
+        items = []
+    }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: Self.storageKey)
+        }
+    }
+}
+
 struct BuildYourOwnRoutineView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var catalog = ExerciseCatalog.shared
     @State private var customExerciseStore = CustomExerciseStore.shared
+    @State private var queue = RoutineBuilderQueue.shared
 
     @State private var routineName = ""
     @State private var routineDescription = ""
-    @State private var items: [SavedRoutineExercise] = []
     @State private var selectedColorName = "purple"
     @State private var selectedIcon = "figure.mixed.cardio"
     @State private var showingPicker = false
+    @State private var showingClearConfirmation = false
 
     private static let colorOptions: [(name: String, color: Color)] = [
         ("purple", .purple), ("blue", .blue), ("green", .green), ("orange", .orange),
@@ -39,7 +84,7 @@ struct BuildYourOwnRoutineView: View {
     ]
 
     private var canSave: Bool {
-        !routineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !items.isEmpty
+        !routineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !queue.items.isEmpty
     }
 
     var body: some View {
@@ -86,15 +131,22 @@ struct BuildYourOwnRoutineView: View {
                     } label: {
                         Label("Add Exercise or Stretch", systemImage: "plus.circle.fill")
                     }
+                    if !queue.items.isEmpty {
+                        Button(role: .destructive) {
+                            showingClearConfirmation = true
+                        } label: {
+                            Label("Clear All", systemImage: "trash")
+                        }
+                    }
                 } header: {
                     Text("Your Routine")
                 } footer: {
-                    if items.isEmpty {
+                    if queue.items.isEmpty {
                         Text("Add exercises, then set each one's duration, rest, and order below.")
                     }
                 }
 
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, _ in
+                ForEach(Array(queue.items.enumerated()), id: \.element.id) { index, _ in
                     Section {
                         builderRow(index: index)
                     }
@@ -106,23 +158,23 @@ struct BuildYourOwnRoutineView: View {
 #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Close") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
                         .disabled(!canSave)
                 }
             }
+            .confirmationDialog(
+                "Clear all exercises from this routine?",
+                isPresented: $showingClearConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Clear All", role: .destructive) { queue.clear() }
+            }
             .sheet(isPresented: $showingPicker) {
                 ExercisePickerSheet(catalog: catalog, customExercises: customExerciseStore.exercises) { name, singleSided, isStretch in
-                    items.append(SavedRoutineExercise(
-                        name: name,
-                        duration: isStretch ? 20 : 30,
-                        restDuration: isStretch ? 0 : 10,
-                        singleSided: singleSided,
-                        restAfterEachSide: false,
-                        moveType: isStretch ? .hold : .move
-                    ))
+                    queue.add(name: name, singleSided: singleSided, isStretch: isStretch)
                 }
             }
         }
@@ -134,7 +186,7 @@ struct BuildYourOwnRoutineView: View {
 
     @ViewBuilder
     private func builderRow(index: Int) -> some View {
-        let item = items[index]
+        let item = queue.items[index]
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(item.name)
@@ -154,10 +206,10 @@ struct BuildYourOwnRoutineView: View {
                     } label: {
                         Image(systemName: "chevron.down")
                     }
-                    .disabled(index == items.count - 1)
+                    .disabled(index == queue.items.count - 1)
 
                     Button(role: .destructive) {
-                        items.remove(at: index)
+                        queue.items.remove(at: index)
                     } label: {
                         Image(systemName: "trash")
                     }
@@ -231,15 +283,15 @@ struct BuildYourOwnRoutineView: View {
     /// row can edit it directly without each needing its own get/set boilerplate.
     private func binding<T>(for index: Int, _ keyPath: WritableKeyPath<SavedRoutineExercise, T>) -> Binding<T> {
         Binding(
-            get: { items[index][keyPath: keyPath] },
-            set: { items[index][keyPath: keyPath] = $0 }
+            get: { queue.items[index][keyPath: keyPath] },
+            set: { queue.items[index][keyPath: keyPath] = $0 }
         )
     }
 
     private func moveItem(at index: Int, offset: Int) {
         let target = index + offset
-        guard items.indices.contains(index), items.indices.contains(target) else { return }
-        items.swapAt(index, target)
+        guard queue.items.indices.contains(index), queue.items.indices.contains(target) else { return }
+        queue.items.swapAt(index, target)
     }
 
     private func save() {
@@ -248,11 +300,12 @@ struct BuildYourOwnRoutineView: View {
             routineDescription: routineDescription.trimmingCharacters(in: .whitespacesAndNewlines),
             source: "You",
             sourceURL: "",
-            exercises: items,
+            exercises: queue.items,
             accentColorName: selectedColorName,
             systemImage: selectedIcon
         )
         SavedRoutineStore.shared.save(routine)
+        queue.clear()
         dismiss()
     }
 }
@@ -374,5 +427,38 @@ private struct ExercisePickerSheet: View {
                 }
             }
         }
+    }
+}
+
+/// Music/Podcasts-style mini-player bar: shows what's queued for "Build Your Own" and opens the
+/// builder on tap. Shown above the tab bar — via the system bottom accessory on iOS 26+, or a
+/// `safeAreaInset` on each tab's own content as a fallback elsewhere (see RootTabView.swift).
+struct RoutineQueueBar: View {
+    let queue: RoutineBuilderQueue
+    let onTap: () -> Void
+
+    private var totalSeconds: Int {
+        queue.items.reduce(0) { $0 + $1.totalSeconds }
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 10) {
+                Image(systemName: "text.badge.plus")
+                    .font(.headline)
+                    .foregroundStyle(.purple)
+                Text("\(queue.items.count) \(queue.items.count == 1 ? "exercise" : "exercises") · \(SavedWorkoutRoutine.formatDuration(totalSeconds))")
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

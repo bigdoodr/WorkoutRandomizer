@@ -24,6 +24,7 @@ import AppKit
 
 struct MyExercisesView: View {
     @State private var store = CustomExerciseStore.shared
+    @State private var queue = RoutineBuilderQueue.shared
     @State private var showingAdd = false
 
     let focusAreas: [String]
@@ -43,6 +44,21 @@ struct MyExercisesView: View {
                     Text("\(exercise.focusArea) — \(exercise.difficulty)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                .swipeActions(edge: .leading) {
+                    Button {
+                        queue.add(name: exercise.name, singleSided: false, isStretch: false)
+                    } label: {
+                        Label("Add to Routine", systemImage: "text.badge.plus")
+                    }
+                    .tint(.purple)
+                }
+                .contextMenu {
+                    Button {
+                        queue.add(name: exercise.name, singleSided: false, isStretch: false)
+                    } label: {
+                        Label("Add to Routine", systemImage: "text.badge.plus")
+                    }
                 }
             }
             .onDelete { offsets in

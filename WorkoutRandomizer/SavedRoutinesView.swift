@@ -38,6 +38,13 @@ struct SavedRoutineExercise: Identifiable, Codable {
         self.restAfterEachSide = restAfterEachSide
         self.moveType = moveType
     }
+
+    var totalSeconds: Int {
+        let sides = singleSided ? 2 : 1
+        let work = duration * sides
+        let rest = (singleSided && restAfterEachSide) ? restDuration * 2 : restDuration
+        return work + rest
+    }
 }
 
 struct SavedWorkoutRoutine: Identifiable, Codable {
@@ -65,23 +72,16 @@ struct SavedWorkoutRoutine: Identifiable, Codable {
     }
 
     var totalDurationSeconds: Int {
-        exercises.reduce(0) { total, ex in
-            let sides = ex.singleSided ? 2 : 1
-            let work = ex.duration * sides
-            let rest: Int
-            if ex.singleSided && ex.restAfterEachSide {
-                rest = ex.restDuration * 2
-            } else {
-                rest = ex.restDuration
-            }
-            return total + work + rest
-        }
+        exercises.reduce(0) { $0 + $1.totalSeconds }
     }
 
     var formattedDuration: String {
-        let s = totalDurationSeconds
-        let m = s / 60
-        let sec = s % 60
+        Self.formatDuration(totalDurationSeconds)
+    }
+
+    static func formatDuration(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let sec = seconds % 60
         return sec == 0 ? "\(m) min" : "\(m)m \(sec)s"
     }
 }

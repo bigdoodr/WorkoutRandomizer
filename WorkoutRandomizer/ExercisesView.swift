@@ -175,7 +175,7 @@ struct ExercisesView: View {
                         let items: [CatalogEntry] = groupedByArea[area]?[diff] ?? []
                         if !items.isEmpty {
                             ForEach(items, id: \.exercise.name) { entry in
-                                ExerciseRow(entry: entry) {
+                                ExerciseRow(entry: entry, isStretch: false) {
                                     prepareAndPresent(entry: entry)
                                 }
                             }
@@ -197,7 +197,7 @@ struct ExercisesView: View {
                             .foregroundStyle(.teal)
                             .listRowBackground(Color.teal.opacity(0.06))
                         ForEach(stretchItemsForArea(area), id: \.exercise.name) { entry in
-                            ExerciseRow(entry: entry) {
+                            ExerciseRow(entry: entry, isStretch: true) {
                                 prepareAndPresent(entry: entry)
                             }
                         }
@@ -384,9 +384,15 @@ struct ExercisesView: View {
 
 private struct ExerciseRow: View {
     let entry: CatalogEntry
+    let isStretch: Bool
     let onPlay: () -> Void
 
     @State private var favorites = FavoritesStore.shared
+    @State private var queue = RoutineBuilderQueue.shared
+
+    private func addToRoutine() {
+        queue.add(name: entry.exercise.name, singleSided: entry.exercise.singleSided, isStretch: isStretch)
+    }
 
     var body: some View {
         let videoManager = VideoManager.shared
@@ -427,6 +433,21 @@ private struct ExerciseRow: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if videoURL != nil { onPlay() }
+        }
+        .swipeActions(edge: .leading) {
+            Button {
+                addToRoutine()
+            } label: {
+                Label("Add to Routine", systemImage: "text.badge.plus")
+            }
+            .tint(.purple)
+        }
+        .contextMenu {
+            Button {
+                addToRoutine()
+            } label: {
+                Label("Add to Routine", systemImage: "text.badge.plus")
+            }
         }
     }
 }
