@@ -146,9 +146,9 @@ struct BuildYourOwnRoutineView: View {
                     }
                 }
 
-                ForEach(Array(queue.items.enumerated()), id: \.element.id) { index, _ in
+                ForEach(queue.items) { item in
                     Section {
-                        builderRow(index: index)
+                        builderRow(for: item)
                     }
                 }
             }
@@ -185,8 +185,8 @@ struct BuildYourOwnRoutineView: View {
     }
 
     @ViewBuilder
-    private func builderRow(index: Int) -> some View {
-        let item = queue.items[index]
+    private func builderRow(for item: SavedRoutineExercise) -> some View {
+        let index = queue.items.firstIndex(where: { $0.id == item.id }) ?? 0
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(item.name)
@@ -195,21 +195,21 @@ struct BuildYourOwnRoutineView: View {
                 Spacer()
                 HStack(spacing: 14) {
                     Button {
-                        moveItem(at: index, offset: -1)
+                        moveItem(item, offset: -1)
                     } label: {
                         Image(systemName: "chevron.up")
                     }
                     .disabled(index == 0)
 
                     Button {
-                        moveItem(at: index, offset: 1)
+                        moveItem(item, offset: 1)
                     } label: {
                         Image(systemName: "chevron.down")
                     }
                     .disabled(index == queue.items.count - 1)
 
                     Button(role: .destructive) {
-                        queue.items.remove(at: index)
+                        queue.items.removeAll { $0.id == item.id }
                     } label: {
                         Image(systemName: "trash")
                     }
@@ -219,14 +219,14 @@ struct BuildYourOwnRoutineView: View {
                 .foregroundStyle(.secondary)
             }
 
-            Picker("Type", selection: binding(for: index, \.moveType)) {
+            Picker("Type", selection: binding(for: item, \.moveType)) {
                 Text("Hold").tag(SavedMoveType.hold)
                 Text("Move").tag(SavedMoveType.move)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
 
-            Stepper(value: binding(for: index, \.duration), in: 5...300, step: 5) {
+            Stepper(value: binding(for: item, \.duration), in: 5...300, step: 5) {
                 HStack {
                     Text(item.singleSided ? "Duration (per side)" : "Duration")
                     Spacer()
@@ -235,7 +235,7 @@ struct BuildYourOwnRoutineView: View {
                 }
             }
 
-            Stepper(value: binding(for: index, \.restDuration), in: 0...120, step: 5) {
+            Stepper(value: binding(for: item, \.restDuration), in: 0...120, step: 5) {
                 HStack {
                     Text("Rest After")
                     Spacer()
@@ -245,7 +245,7 @@ struct BuildYourOwnRoutineView: View {
             }
 
             if item.singleSided {
-                Toggle("Rest Between Sides", isOn: binding(for: index, \.restAfterEachSide))
+                Toggle("Rest Between Sides", isOn: binding(for: item, \.restAfterEachSide))
             }
 
             if let warning = durationWarning(for: item) {
@@ -279,18 +279,26 @@ struct BuildYourOwnRoutineView: View {
         return "\(level) holds are tough to sustain this long — consider a shorter duration or an easier variation."
     }
 
-    /// A two-way binding into one field of `items[index]`, so Steppers/Toggles/Pickers in the
-    /// row can edit it directly without each needing its own get/set boilerplate.
-    private func binding<T>(for index: Int, _ keyPath: WritableKeyPath<SavedRoutineExercise, T>) -> Binding<T> {
+    /// A two-way binding into one field of the item matching `item.id`, resolved fresh on every
+    /// get/set rather than captured as a fixed array position — a captured index can go stale
+    /// (and crash on an out-of-bounds access) the moment another row is removed, since `List`/
+    /// `Form` row content can still be evaluated mid-removal-animation against the shrunk array.
+    private func binding<T>(for item: SavedRoutineExercise, _ keyPath: WritableKeyPath<SavedRoutineExercise, T>) -> Binding<T> {
         Binding(
-            get: { queue.items[index][keyPath: keyPath] },
-            set: { queue.items[index][keyPath: keyPath] = $0 }
+            get: {
+                queue.items.first(where: { $0.id == item.id })?[keyPath: keyPath] ?? item[keyPath: keyPath]
+            },
+            set: { newValue in
+                guard let idx = queue.items.firstIndex(where: { $0.id == item.id }) else { return }
+                queue.items[idx][keyPath: keyPath] = newValue
+            }
         )
     }
 
-    private func moveItem(at index: Int, offset: Int) {
+    private func moveItem(_ item: SavedRoutineExercise, offset: Int) {
+        guard let index = queue.items.firstIndex(where: { $0.id == item.id }) else { return }
         let target = index + offset
-        guard queue.items.indices.contains(index), queue.items.indices.contains(target) else { return }
+        guard queue.items.indices.contains(target) else { return }
         queue.items.swapAt(index, target)
     }
 

@@ -84,6 +84,23 @@ struct SavedWorkoutRoutine: Identifiable, Codable {
         let sec = seconds % 60
         return sec == 0 ? "\(m) min" : "\(m)m \(sec)s"
     }
+
+#if canImport(HealthKit)
+    /// Classifies the routine for HealthKit. Saved/built routines don't carry the generator's
+    /// focus-area tags, so this falls back to a simple hold-vs-move ratio (mostly holds reads as
+    /// a stretch session, matching the preloaded stretch routines) and otherwise defers to
+    /// whatever intention the person picked before starting — mirrors
+    /// `WorkoutPlayerView.resolvedActivityType`.
+    func resolvedActivityType(intention: WorkoutIntention) -> HKWorkoutActivityType {
+        guard !exercises.isEmpty else { return .other }
+        let holdFraction = Double(exercises.filter { $0.moveType == .hold }.count) / Double(exercises.count)
+        if holdFraction >= 0.8 { return .flexibility }
+        switch intention {
+        case .strengthPower: return .functionalStrengthTraining
+        case .generalFitness, .fatBurn, .cardioEndurance, .hiit: return .highIntensityIntervalTraining
+        }
+    }
+#endif
 }
 
 // MARK: - Saved Routine Store
@@ -278,6 +295,7 @@ private struct RoutineRow: View {
 struct SavedRoutineDetailView: View {
     let routine: SavedWorkoutRoutine
     @State private var showingPlayer = false
+    @State private var selectedIntention: WorkoutIntention = .generalFitness
 
     var body: some View {
         ScrollView {
@@ -377,6 +395,31 @@ struct SavedRoutineDetailView: View {
                     }
                 }
 
+                // Intention — frames the HR-zone targets and recap for this session, same as
+                // the generator's own Intention picker (WorkoutGeneratorView.swift).
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Intention")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                    OverflowScrollRow(items: WorkoutIntention.allCases) { intent in
+                        Button { selectedIntention = intent } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: intent.icon)
+                                    .font(.subheadline)
+                                Text(intent.rawValue)
+                                    .font(.caption2)
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(selectedIntention == intent ? intent.bannerColor : Color.gray.opacity(0.1))
+                            .foregroundStyle(selectedIntention == intent ? .white : .primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
                 // Start button
                 Button {
                     showingPlayer = true
@@ -400,7 +443,7 @@ struct SavedRoutineDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
 #endif
         .sheet(isPresented: $showingPlayer) {
-            SavedRoutinePlayerView(routine: routine)
+            SavedRoutinePlayerView(routine: routine, intention: selectedIntention)
         }
     }
 }
@@ -420,6 +463,7 @@ private struct PlayerStep: Identifiable {
 
 struct SavedRoutinePlayerView: View {
     let routine: SavedWorkoutRoutine
+    var intention: WorkoutIntention = .generalFitness
 
     @State private var steps: [PlayerStep] = []
     @State private var currentIndex = 0
@@ -428,6 +472,13 @@ struct SavedRoutinePlayerView: View {
     @State private var isPaused = false
     @State private var timer: Timer?
     @State private var showingRecap = false
+    // Recap stats — mirrors WorkoutPlayerView's own tracking so saved/built routines get the
+    // same rich WorkoutRecapView instead of a bare name-and-duration screen.
+    @State private var totalExerciseTime = 0
+    @State private var totalRestTime = 0
+    @State private var completedStepNames: [String] = []
+    @State private var peakHeartRate: Double = 0
+    @State private var heartRateSamples: [Double] = []
     @Environment(\.dismiss) private var dismiss
     @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
     @StateObject private var videoManager = VideoManager.shared
@@ -452,6 +503,17 @@ struct SavedRoutinePlayerView: View {
     private var videoURL: URL? {
         guard let step = currentStep, !step.isRest else { return nil }
         return VideoManager.shared.url(for: step.label)
+    }
+
+    private var nextUpText: String {
+        let nextIndex = currentIndex + 1
+        guard nextIndex < steps.count else { return "End of routine" }
+        let step = steps[nextIndex]
+        return step.isRest ? "Rest" : step.label
+    }
+
+    private var averageHeartRate: Double {
+        heartRateSamples.isEmpty ? 0 : heartRateSamples.reduce(0, +) / Double(heartRateSamples.count)
     }
 
     var body: some View {
@@ -531,11 +593,23 @@ struct SavedRoutinePlayerView: View {
                         }
                         .frame(width: 180, height: 180)
 
-                        // Progress
+                        // Progress and Next up
                         if !steps.isEmpty {
                             Text("Step \(min(currentIndex + 1, steps.count)) of \(steps.count)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        if isPlaying && currentIndex < steps.count {
+                            HStack(spacing: 4) {
+                                Text("Next:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(nextUpText)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
+                            }
                         }
 
                         Spacer(minLength: 8)
@@ -632,7 +706,32 @@ struct SavedRoutinePlayerView: View {
         }
 #endif
         .sheet(isPresented: $showingRecap) {
-            SavedRoutineRecapView(routine: routine, onDismiss: { dismiss() })
+            WorkoutRecapView(
+                completedExercises: completedStepNames,
+                totalExerciseTime: totalExerciseTime,
+                totalRestTime: totalRestTime,
+                totalCalories: {
+                    #if os(iOS)
+                    return connectivityManager.activeCalories
+                    #else
+                    return 0
+                    #endif
+                }(),
+                peakHeartRate: peakHeartRate,
+                averageHeartRate: averageHeartRate,
+                hrZoneDurations: {
+                    #if os(iOS)
+                    return connectivityManager.completedZoneDurations
+                    #else
+                    return []
+                    #endif
+                }(),
+                intention: intention,
+                onDismiss: {
+                    showingRecap = false
+                    dismiss()
+                }
+            )
         }
     }
 
@@ -721,6 +820,21 @@ struct SavedRoutinePlayerView: View {
         guard isPlaying && !isPaused else { return }
         if timeRemaining > 1 {
             timeRemaining -= 1
+
+            if currentStep?.isRest == true {
+                totalRestTime += 1
+            } else {
+                totalExerciseTime += 1
+            }
+
+#if os(iOS)
+            let hr = connectivityManager.heartRate
+            if hr > 0 {
+                heartRateSamples.append(hr)
+                if hr > peakHeartRate { peakHeartRate = hr }
+            }
+#endif
+
             let t = timeRemaining
             connectivityManager.sendTimerUpdate(timeRemaining: t)
             if timeRemaining == 3 { playBeep(type: .warning) }
@@ -731,6 +845,9 @@ struct SavedRoutinePlayerView: View {
 
     private func advance() {
         playBeep(type: .end)
+        if let step = currentStep, !step.isRest {
+            completedStepNames.append(step.label)
+        }
         let next = currentIndex + 1
         if next < steps.count {
             currentIndex = next
@@ -743,6 +860,13 @@ struct SavedRoutinePlayerView: View {
             isPlaying = false
             setIdleTimer(disabled: false)
             playBeep(type: .complete)
+#if os(iOS)
+            connectivityManager.sendWorkoutCompleted(
+                count: completedStepNames.count,
+                totalSeconds: totalExerciseTime + totalRestTime,
+                label: routine.name
+            )
+#endif
             sendControlToWatch(.workoutStopped)
 #if canImport(AVFoundation)
             avPlayer?.pause()
@@ -968,7 +1092,9 @@ struct SavedRoutinePlayerView: View {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         let store = HKHealthStore()
         let configuration = HKWorkoutConfiguration()
-        configuration.activityType = routine.id == PreloadedRoutines.absWorkout.id ? .coreTraining : .flexibility
+        configuration.activityType = routine.id == PreloadedRoutines.absWorkout.id
+            ? .coreTraining
+            : routine.resolvedActivityType(intention: intention)
         configuration.locationType = .indoor
         store.startWatchApp(with: configuration) { success, error in
             if let error = error {
@@ -1002,50 +1128,5 @@ struct SavedRoutinePlayerView: View {
 #if os(iOS)
         connectivityManager.sendControlMessage(control)
 #endif
-    }
-}
-
-// MARK: - Recap
-
-struct SavedRoutineRecapView: View {
-    let routine: SavedWorkoutRoutine
-    let onDismiss: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 28) {
-                Spacer()
-
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 72))
-                    .foregroundStyle(routine.accentColor)
-
-                Text("Routine Complete!")
-                    .font(.title)
-                    .fontWeight(.bold)
-
-                VStack(spacing: 8) {
-                    Text(routine.name)
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                    Text(routine.formattedDuration)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button("Done") { onDismiss() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(routine.accentColor)
-                    .controlSize(.large)
-
-                Spacer(minLength: 30)
-            }
-            .navigationTitle("Recap")
-#if os(iOS) || os(visionOS)
-            .navigationBarTitleDisplayMode(.inline)
-#endif
-        }
     }
 }
