@@ -306,7 +306,6 @@ struct StretchRoutineView: View {
             }
             .padding()
         }
-        .navigationTitle("Stretch Routine")
         .sheet(isPresented: $showingPlayer) {
             StretchPlayerView(
                 stretches: generatedStretches,

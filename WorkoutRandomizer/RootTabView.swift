@@ -33,16 +33,16 @@ struct RootTabView: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            // The generator supplies its own NavigationStack already.
+            // None of the tab root views carries a NavigationStack of its own — each tab has
+            // to provide one or their navigation titles and toolbars have nothing to attach
+            // to. (SettingsView is the exception: it already wraps itself in one.)
             Tab("Generate", systemImage: "figure.mixed.cardio", value: AppTab.generator) {
-                WorkoutGeneratorView()
-                    .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
+                NavigationStack {
+                    GenerateHubView()
+                }
+                .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
 
-            // The other tabs were only ever pushed from the generator, so none of their root
-            // views carries a NavigationStack of its own — each tab has to provide one or their
-            // navigation titles and toolbars have nothing to attach to. (SettingsView is the
-            // exception: it already wraps itself in one.)
             Tab("Exercises", systemImage: "list.bullet.rectangle.portrait", value: AppTab.exercises) {
                 NavigationStack {
                     ExercisesHubView()
@@ -81,6 +81,44 @@ struct RootTabView: View {
         .sheet(isPresented: $showingBuilder) {
             BuildYourOwnRoutineView()
         }
+    }
+}
+
+/// Generate tab: the workout generator and the stretch generator behind a Workout | Stretch
+/// picker. Both stay alive and the unselected one is just hidden — the workout generator
+/// holds ~30 settings plus the generated routine, and rebuilding it on each switch would wipe
+/// them. That's safe here because neither screen contributes toolbar items; if one ever does,
+/// hiding it won't hide its toolbar and this will need a different approach.
+private struct GenerateHubView: View {
+    private enum Segment: String, CaseIterable, Identifiable {
+        case workout = "Workout"
+        case stretch = "Stretch"
+        var id: String { rawValue }
+    }
+
+    @State private var segment: Segment = .workout
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Mode", selection: $segment) {
+                ForEach(Segment.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+
+            ZStack {
+                WorkoutGeneratorView()
+                    .opacity(segment == .workout ? 1 : 0)
+                    .allowsHitTesting(segment == .workout)
+                    .accessibilityHidden(segment != .workout)
+                StretchRoutineView()
+                    .opacity(segment == .stretch ? 1 : 0)
+                    .allowsHitTesting(segment == .stretch)
+                    .accessibilityHidden(segment != .stretch)
+            }
+        }
+        .navigationTitle(segment == .workout ? "Workout Generator" : "Stretch Routine")
     }
 }
 

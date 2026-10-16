@@ -357,12 +357,14 @@ struct WorkoutGeneratorView: View {
     }
     
     var body: some View {
-        NavigationStack {
+        // The enclosing NavigationStack (and the title) live in GenerateHubView, which switches
+        // between this and the stretch generator.
+        Group {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        
-                        
+
+
                         // Focus Areas
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Focus Areas")
@@ -1117,7 +1119,6 @@ struct WorkoutGeneratorView: View {
                     .padding()
                 }
             }
-            .navigationTitle("Workout Generator")
         }
         .sheet(isPresented: $showingWorkout) {
             WorkoutPlayerView(

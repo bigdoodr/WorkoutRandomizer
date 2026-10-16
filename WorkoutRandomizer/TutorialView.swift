@@ -68,12 +68,12 @@ struct TutorialView: View {
         ),
         TutorialPage(
             title: "Customize Every Session",
-            body: "Tap the icon chips to choose focus areas — one or many. Difficulty is multi-select too, so a session can mix Beginner and Medium. Tell the app what equipment you have and it only draws from moves you can do. Prefer just stretching? The Stretch section of the Exercises tab runs a hold-based session of its own, with video demos.",
+            body: "Tap the icon chips to choose focus areas — one or many. Difficulty is multi-select too, so a session can mix Beginner and Medium. Tell the app what equipment you have and it only draws from moves you can do. Prefer just stretching? Switch the picker at the top of Generate to Stretch for a hold-based session of its own, with video demos.",
             icon: "figure.mixed.cardio", color: .purple, since: "1.0"
         ),
         TutorialPage(
             title: "Getting Around & Settings",
-            body: "Four tabs along the bottom. Generate builds a workout. Exercises browses the whole catalog with demo videos, holds the moves you add yourself under Mine, and runs stretch-only sessions under Stretch. Saved holds curated routines and your own. Settings is where video, sound, and haptics all stick between launches — and you can reopen this guide any time.",
+            body: "Four tabs along the bottom. Generate builds a workout, or a stretch-only session from its Stretch picker. Exercises browses the whole catalog with demo videos and holds the moves you add yourself under Mine. Saved holds curated routines and your own. Settings is where video, sound, and haptics all stick between launches — and you can reopen this guide any time.",
             icon: "square.grid.2x2.fill", color: .cyan, since: "2.0"
         ),
         TutorialPage(

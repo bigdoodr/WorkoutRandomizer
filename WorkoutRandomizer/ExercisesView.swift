@@ -21,16 +21,14 @@ struct CatalogEntry: Identifiable, Hashable {
     let exercise: Exercise
 }
 
-/// One tab for everything exercise-related: the bundled library, the user's own exercises, and
-/// the stretch routine builder. Each child supplies its own title and toolbar (none owns a
-/// NavigationStack), so only the visible segment's toolbar shows. Switching segments rebuilds
-/// the child, so its filters/selection reset — keeping all three alive would stack their
-/// toolbars on top of each other.
+/// One tab for everything exercise-related: the bundled library and the user's own exercises.
+/// Each child supplies its own title and toolbar (neither owns a NavigationStack), so only the
+/// visible segment's toolbar shows. Switching segments rebuilds the child, so its filters
+/// reset — keeping both alive would stack their toolbars on top of each other.
 struct ExercisesHubView: View {
     private enum Segment: String, CaseIterable, Identifiable {
         case library = "Library"
         case mine = "Mine"
-        case stretch = "Stretch"
         var id: String { rawValue }
     }
 
@@ -51,8 +49,6 @@ struct ExercisesHubView: View {
                 ExercisesView(exercisesByArea: catalog.exercises)
             case .mine:
                 MyExercisesView(focusAreas: catalog.focusAreas, difficulties: catalog.difficulties)
-            case .stretch:
-                StretchRoutineView()
             }
         }
     }
