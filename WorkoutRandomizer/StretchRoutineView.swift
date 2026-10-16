@@ -22,7 +22,6 @@ private enum CategoryChip: Hashable {
 }
 
 struct StretchRoutineView: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var catalog = ExerciseCatalog.shared
     @State private var favorites = FavoritesStore.shared
     @State private var favoritesOnly = false
@@ -33,7 +32,6 @@ struct StretchRoutineView: View {
     @State private var bothSidesMode: Bool = true
     @State private var generatedStretches: [Exercise] = []
     @State private var showingPlayer = false
-    @State private var completedStretchSession = false
 
     private let holdDurationOptions = [10, 15, 20, 30]
 
@@ -309,17 +307,12 @@ struct StretchRoutineView: View {
             .padding()
         }
         .navigationTitle("Stretch Routine")
-        .sheet(isPresented: $showingPlayer, onDismiss: {
-            if completedStretchSession {
-                completedStretchSession = false
-                dismiss()
-            }
-        }) {
+        .sheet(isPresented: $showingPlayer) {
             StretchPlayerView(
                 stretches: generatedStretches,
                 holdDuration: holdDuration,
                 bothSidesMode: bothSidesMode,
-                onComplete: { completedStretchSession = true }
+                onComplete: { }
             )
         }
         .onAppear {

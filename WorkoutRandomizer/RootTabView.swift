@@ -13,9 +13,6 @@
 import SwiftUI
 
 struct RootTabView: View {
-    /// Owned here rather than per-tab so the generator and the exercise browser read the same
-    /// catalog instance, and a remote refresh updates every tab at once.
-    @State private var catalog = ExerciseCatalog.shared
     @State private var selection: AppTab = .generator
     // Regular width means an iPad-sized layout, or the inner display of a dual-screen iPhone —
     // both want the sidebar. iPhone's outer display and a folded dual-screen iPhone are compact
@@ -28,8 +25,10 @@ struct RootTabView: View {
     @State private var queue = RoutineBuilderQueue.shared
     @State private var showingBuilder = false
 
+    @State private var hrZones = HRZoneSettings.shared
+
     enum AppTab: Hashable {
-        case generator, allExercises, stretch, saved, myExercises
+        case generator, exercises, saved, settings
     }
 
     var body: some View {
@@ -40,19 +39,13 @@ struct RootTabView: View {
                     .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
 
-            // The remaining four were only ever pushed from the generator, so none of them
-            // carries a NavigationStack of its own — each tab has to provide one or their
-            // navigation titles and toolbars have nothing to attach to.
-            Tab("Exercises", systemImage: "list.bullet.rectangle.portrait", value: AppTab.allExercises) {
+            // The other tabs were only ever pushed from the generator, so none of their root
+            // views carries a NavigationStack of its own — each tab has to provide one or their
+            // navigation titles and toolbars have nothing to attach to. (SettingsView is the
+            // exception: it already wraps itself in one.)
+            Tab("Exercises", systemImage: "list.bullet.rectangle.portrait", value: AppTab.exercises) {
                 NavigationStack {
-                    ExercisesView(exercisesByArea: catalog.exercises)
-                }
-                .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
-            }
-
-            Tab("Stretch", systemImage: "figure.cooldown", value: AppTab.stretch) {
-                NavigationStack {
-                    StretchRoutineView()
+                    ExercisesHubView()
                 }
                 .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
@@ -64,15 +57,11 @@ struct RootTabView: View {
                 .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
 
-            Tab("My Exercises", systemImage: "person.badge.plus", value: AppTab.myExercises) {
-                NavigationStack {
-                    MyExercisesView(
-                        focusAreas: catalog.focusAreas,
-                        difficulties: catalog.difficulties
-                    )
-                }
-                .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
+            Tab("Settings", systemImage: "gearshape", value: AppTab.settings) {
+                SettingsView()
+                    .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
+            .badge(hrZones.isAgeMissing ? Text("!") : nil)
         }
         // A five-item bottom bar is the compact-width idiom. On the Mac, iPad, and the inner
         // display of a dual-screen iPhone, the same tabs become a sidebar instead.

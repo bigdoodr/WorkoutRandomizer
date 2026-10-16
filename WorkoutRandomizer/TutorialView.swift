@@ -68,12 +68,12 @@ struct TutorialView: View {
         ),
         TutorialPage(
             title: "Customize Every Session",
-            body: "Tap the icon chips to choose focus areas — one or many. Difficulty is multi-select too, so a session can mix Beginner and Medium. Tell the app what equipment you have and it only draws from moves you can do. Prefer just stretching? The Stretch tab runs a hold-based session of its own, with video demos.",
+            body: "Tap the icon chips to choose focus areas — one or many. Difficulty is multi-select too, so a session can mix Beginner and Medium. Tell the app what equipment you have and it only draws from moves you can do. Prefer just stretching? The Stretch section of the Exercises tab runs a hold-based session of its own, with video demos.",
             icon: "figure.mixed.cardio", color: .purple, since: "1.0"
         ),
         TutorialPage(
             title: "Getting Around & Settings",
-            body: "Five tabs along the bottom. Generate builds a workout. Exercises browses the whole catalog with demo videos. Stretch runs a stretch-only session. Saved holds curated routines and your own. My Exercises is for moves you add yourself. The gear button opens Settings, where video, sound, and haptics all stick between launches — and you can reopen this guide any time.",
+            body: "Four tabs along the bottom. Generate builds a workout. Exercises browses the whole catalog with demo videos, holds the moves you add yourself under Mine, and runs stretch-only sessions under Stretch. Saved holds curated routines and your own. Settings is where video, sound, and haptics all stick between launches — and you can reopen this guide any time.",
             icon: "square.grid.2x2.fill", color: .cyan, since: "2.0"
         ),
         TutorialPage(
@@ -88,7 +88,7 @@ struct TutorialView: View {
         ),
         TutorialPage(
             title: "Track Your Progress",
-            body: "Add your own moves in My Exercises with a name, focus area, and difficulty — they join the pool the generator draws from. While a workout runs you get live exercise time, heart-rate zone, and burn type; the recap after shows total and working time, calories, and peak/average heart rate.",
+            body: "Add your own moves under Mine in the Exercises tab with a name, focus area, and difficulty — they join the pool the generator draws from. While a workout runs you get live exercise time, heart-rate zone, and burn type; the recap after shows total and working time, calories, and peak/average heart rate.",
             icon: "chart.bar.fill", color: .mint, since: "1.3"
         ),
         TutorialPage(

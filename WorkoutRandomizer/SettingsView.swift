@@ -14,11 +14,6 @@
 import SwiftUI
 
 struct SettingsView: View {
-    /// Raised, not acted on. The guide has to be presented by whoever presented *this* sheet,
-    /// after this one closes — SwiftUI supports a single sheet at a time, and asking for a
-    /// second from inside the first is what wedges the presentation machinery.
-    @Binding var showGuideRequest: Bool
-
     @AppStorage("enableSound_iOS_tv_vision") private var enableSound_iOS_tv_vision = true
     @AppStorage("enableHaptics_iOS_vision") private var enableHaptics_iOS_vision = true
     @AppStorage("enableSound_macOS") private var enableSound_macOS = true
@@ -27,7 +22,7 @@ struct SettingsView: View {
     @StateObject private var videoManager = VideoManager.shared
     @State private var downloadProgress: (completed: Int, total: Int)? = nil
     @State private var hrZones = HRZoneSettings.shared
-    @Environment(\.dismiss) private var dismiss
+    @State private var showingGuide = false
 
     var body: some View {
         NavigationStack {
@@ -105,8 +100,7 @@ struct SettingsView: View {
 
                 Section {
                     Button("Show Full Guide") {
-                        showGuideRequest = true
-                        dismiss()
+                        showingGuide = true
                     }
                 } header: {
                     Text("Guide")
@@ -118,10 +112,8 @@ struct SettingsView: View {
 #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
+            .sheet(isPresented: $showingGuide) {
+                TutorialView(mode: .full)
             }
         }
     }

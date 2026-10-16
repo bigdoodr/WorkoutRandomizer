@@ -53,26 +53,21 @@ struct WorkoutGeneratorView: View {
     /// install *and* anyone arriving from a build that predates this tracking, so every 1.x
     /// user gets the full 2.0 tour.
     @AppStorage("lastSeenTutorialVersion") private var lastSeenTutorialVersion = ""
-    /// The guide and Settings share one presentation. They used to be two independent `.sheet`
-    /// modifiers, and on a first launch the video-mode dialog and the guide both went up in the
-    /// same pass — SwiftUI presented one, silently swallowed the other, and then refused every
-    /// later sheet ("only presenting a single sheet is supported"), which is what made the
-    /// Settings button do nothing until the app was force-quit.
+    /// The guide and the intention explainer share one presentation. They used to be independent
+    /// `.sheet` modifiers, and on a first launch the video-mode dialog and the guide both went up
+    /// in the same pass — SwiftUI presented one, silently swallowed the other, and then refused
+    /// every later sheet ("only presenting a single sheet is supported").
     @State private var activeSheet: ActiveSheet? = nil
-    /// Set by Settings when the user asks for the guide; acted on once Settings has closed.
-    @State private var showGuideRequest = false
     /// The launch-time decision runs once, not on every return to this tab.
     @State private var didEvaluateGuide = false
 
     private enum ActiveSheet: Identifiable, Equatable {
         case guide(TutorialView.Mode)
-        case settings
         case intentionInfo
 
         var id: String {
             switch self {
             case .guide(let mode): return "guide-\(mode.id)"
-            case .settings: return "settings"
             case .intentionInfo: return "intentionInfo"
             }
         }
@@ -585,18 +580,20 @@ struct WorkoutGeneratorView: View {
                                                     }
                                                     .buttonStyle(.plain)
                                                 }
-                                                Spacer()
-                                                if timerStyle == .standard {
-                                                    Toggle(isOn: $shuffleExerciseTime) {
-                                                        Text("Shuffle")
-                                                            .font(.subheadline)
-                                                    }
-                                                    .toggleStyle(.switch)
-                                                    .fixedSize()
-                                                }
+                                                Spacer(minLength: 0)
                                             }
+                                            // Shuffle replaces the fixed length entirely, so the
+                                            // presets are inert while it's on.
+                                            .disabled(timerStyle == .standard && shuffleExerciseTime)
+                                            .opacity(timerStyle == .standard && shuffleExerciseTime ? 0.4 : 1)
+
                                             if timerStyle == .standard {
-                                                Text("Shuffle Exercise Time: each exercise gets its own random duration instead of one fixed length")
+                                                Toggle(isOn: $shuffleExerciseTime) {
+                                                    Text("Shuffle Exercise Time")
+                                                        .font(.subheadline)
+                                                }
+                                                .toggleStyle(.switch)
+                                                Text("Each exercise gets its own random duration instead of one fixed length")
                                                     .font(.caption)
                                                     .foregroundStyle(.secondary)
                                             }
@@ -632,8 +629,12 @@ struct WorkoutGeneratorView: View {
                                             }
 
                                             if restLinkedToWork {
+                                                // With Shuffle on, every exercise has its own length,
+                                                // so there's no single linked value to show — each
+                                                // rest is half of the exercise before it.
+                                                let shuffleDrivesRest = timerStyle == .standard && shuffleExerciseTime
                                                 HStack(spacing: 8) {
-                                                    Text("\(effectiveRestDuration)s")
+                                                    Text(shuffleDrivesRest ? "½" : "\(effectiveRestDuration)s")
                                                         .font(.subheadline)
                                                         .fontWeight(.medium)
                                                         .padding(.horizontal, 16)
@@ -641,11 +642,14 @@ struct WorkoutGeneratorView: View {
                                                         .background(Color.blue.opacity(0.15))
                                                         .foregroundStyle(.primary)
                                                         .clipShape(Capsule())
-                                                    Text("half of \(exerciseDuration)s work")
+                                                    Text(shuffleDrivesRest
+                                                         ? "half of each exercise's duration"
+                                                         : "half of \(exerciseDuration)s work")
                                                         .font(.caption)
                                                         .foregroundStyle(.secondary)
                                                     Spacer()
                                                 }
+                                                .opacity(shuffleDrivesRest ? 0.4 : 1)
                                             } else {
                                                 HStack(spacing: 8) {
                                                     ForEach([10, 15, 30, 60], id: \.self) { preset in
@@ -1114,38 +1118,6 @@ struct WorkoutGeneratorView: View {
                 }
             }
             .navigationTitle("Workout Generator")
-            .toolbar {
-#if os(iOS) || os(visionOS)
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { activeSheet = .settings } label: {
-                        Label("Settings", systemImage: "gearshape")
-                            .labelStyle(.iconOnly)
-                            .overlay(alignment: .topTrailing) {
-                                if hrZones.isAgeMissing {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.yellow)
-                                        .offset(x: 8, y: -6)
-                                }
-                            }
-                    }
-                }
-#else
-                ToolbarItem {
-                    Button { activeSheet = .settings } label: {
-                        Label("Settings", systemImage: "gearshape")
-                            .overlay(alignment: .topTrailing) {
-                                if hrZones.isAgeMissing {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.yellow)
-                                        .offset(x: 8, y: -6)
-                                }
-                            }
-                    }
-                }
-#endif
-            }
         }
         .sheet(isPresented: $showingWorkout) {
             WorkoutPlayerView(
@@ -1164,22 +1136,14 @@ struct WorkoutGeneratorView: View {
             // stopping now requires the confirmed Stop button inside the player.
             .interactiveDismissDisabled(true)
         }
-        // One sheet for the guide and Settings, so the two can never both try to present.
-        // Whatever should follow a dismissal is decided in onDismiss rather than by setting a
-        // second flag alongside the first.
+        // One sheet for the guide and the intention explainer, so the two can never both try to
+        // present. The video-mode prompt waits until neither is on screen.
         .sheet(item: $activeSheet, onDismiss: {
-            if showGuideRequest {
-                showGuideRequest = false
-                activeSheet = .guide(.full)
-            } else {
-                promptForVideoModeIfNeeded()
-            }
+            promptForVideoModeIfNeeded()
         }) { sheet in
             switch sheet {
             case .guide(let mode):
                 TutorialView(mode: mode)
-            case .settings:
-                SettingsView(showGuideRequest: $showGuideRequest)
             case .intentionInfo:
                 IntentionInfoView()
             }
