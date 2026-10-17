@@ -270,6 +270,9 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
 
             // --- Handoff: iPhone ready for watch to start ---
             case "prepareToStart":
+                if let raw = message["activityTypeRaw"] as? UInt {
+                    WorkoutSessionManager.shared.declareActivityType(raw)
+                }
                 self.isReadyToStart = true
 
             default:
@@ -281,7 +284,11 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
     // Queued delivery when watch app was not in foreground
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String : Any] = [:]) {
         guard let type = userInfo["type"] as? String, type == "prepareToStart" else { return }
+        let declared = userInfo["activityTypeRaw"] as? UInt
         DispatchQueue.main.async {
+            if let declared {
+                WorkoutSessionManager.shared.declareActivityType(declared)
+            }
             self.isReadyToStart = true
             // When the app is backgrounded, surface it via a local notification so the
             // user sees a banner on the watch face and can tap directly into the ready screen.
@@ -317,13 +324,17 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
             self.isReadyToStart = false
             self.isAwaitingSessionStart = false
             let sessionManager = WorkoutSessionManager.shared
+            if let raw = state.activityTypeRaw {
+                sessionManager.declareActivityType(raw)
+            }
             if state.isPlaying && !sessionManager.isWorkoutActive,
-               let config = sessionManager.preparedConfiguration {
+               sessionManager.preparedConfiguration != nil {
                 // The iPhone already declared this session via startWatchApp
                 // (handle(_:) stored the configuration) — start tracking silently,
-                // no prompt needed.
+                // no prompt needed. The manager picks the type: the one declared in this
+                // state first, then the stashed handoff config.
                 Task {
-                    await sessionManager.startWorkout(configuration: config)
+                    await sessionManager.startWorkout()
                 }
             } else if wasNil && state.isPlaying && !sessionManager.isWorkoutActive {
                 // No prepared configuration — the auto-launch may still be in
@@ -357,7 +368,8 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
                 nextExerciseName: state.nextExerciseName,
                 isPlaying: state.isPlaying,
                 isPaused: state.isPaused,
-                sideLabel: state.sideLabel
+                sideLabel: state.sideLabel,
+                activityTypeRaw: state.activityTypeRaw
             )
         } else {
             // Minimal placeholder so the timer is visible before a full state arrives

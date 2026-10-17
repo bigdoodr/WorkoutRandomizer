@@ -28,7 +28,14 @@ final class VideoManager: ObservableObject {
     // Resolve a relative path for a given key (exercise name/ID)
     @MainActor
     func path(for key: String) -> String? {
-        videoPaths[key]
+        if let direct = videoPaths[key] { return direct }
+        // Generated routines split a single-sided exercise into "<Name> (Left)" and
+        // "<Name> (Right)" steps; a saved copy only has those names, but both sides share the
+        // base exercise's demo video.
+        for suffix in [" (Left)", " (Right)"] where key.hasSuffix(suffix) {
+            return videoPaths[String(key.dropLast(suffix.count))]
+        }
+        return nil
     }
 
     // Resolve a playable URL for a given key using the current videoMode

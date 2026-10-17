@@ -33,6 +33,10 @@ public struct WorkoutState: Codable {
     /// e.g. "Left Side" / "Right Side" for single-sided stretches. Optional so
     /// old payloads still decode.
     public var sideLabel: String? = nil
+    /// `HKWorkoutActivityType` raw value the watch should record this session as. Carried with
+    /// every state so the watch doesn't depend on the one-shot `startWatchApp` handoff arriving
+    /// first — without it, a missed handoff silently records as the watch's HIIT default.
+    public var activityTypeRaw: UInt? = nil
 }
 
 // Health metrics sent from Watch to iPhone
@@ -240,12 +244,14 @@ class WorkoutConnectivityManager: ObservableObject {
 
     // MARK: - Watch handoff
 
-    func sendPrepareToStart() {
+    func sendPrepareToStart(activityTypeRaw: UInt? = nil) {
         guard let session = session else { return }
         // Always use transferUserInfo — unlike sendMessage it queues reliably and
         // triggers a WKWatchConnectivityRefreshBackgroundTask on the Watch even when
         // the Watch app isn't running, letting it post a local notification to surface itself.
-        session.transferUserInfo(["type": "prepareToStart"])
+        var info: [String: Any] = ["type": "prepareToStart"]
+        if let activityTypeRaw { info["activityTypeRaw"] = activityTypeRaw }
+        session.transferUserInfo(info)
     }
 
     // MARK: - Receive health metrics from Watch

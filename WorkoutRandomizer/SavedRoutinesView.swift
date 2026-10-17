@@ -1053,6 +1053,32 @@ struct SavedRoutinePlayerView: View {
                             }
                         }
 
+                        // Live workout stats (exercise time, HR zone, nutrient burn) and the
+                        // Apple Watch metrics panel — the same ones generated workouts show.
+                        if isPlaying {
+                            #if os(iOS)
+                            WorkoutLiveStatsView(
+                                exerciseTime: totalExerciseTime,
+                                heartRate: connectivityManager.heartRate,
+                                hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
+                                intention: intention,
+                                zoneThresholds: connectivityManager.watchZoneThresholds
+                            )
+                            .padding(.top, 4)
+                            #else
+                            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false, intention: intention)
+                                .padding(.top, 4)
+                            #endif
+                        }
+
+                        #if os(iOS)
+                        if isPlaying && connectivityManager.isWatchConnected {
+                            HealthMetricsView(connectivityManager: connectivityManager)
+                                .padding(.horizontal)
+                                .padding(.top, 4)
+                        }
+                        #endif
+
                         Spacer(minLength: 8)
                     }
                 }
@@ -1169,6 +1195,8 @@ struct SavedRoutinePlayerView: View {
                 }(),
                 // Stretching has no Intention, so the recap leaves out the zone-alignment score.
                 intention: routine.isFlexibilitySession ? nil : intention,
+                // Core-only routines skip the alignment score, as live Core workouts do.
+                selectedFocusAreas: routine.kind == .core ? ["Core"] : [],
                 onDismiss: {
                     showingRecap = false
                     dismiss()
@@ -1523,8 +1551,18 @@ struct SavedRoutinePlayerView: View {
 #if os(iOS)
         guard !isPlaying else { return }
         connectivityManager.watchRequestedStart = false
-        connectivityManager.sendPrepareToStart()
+        connectivityManager.sendPrepareToStart(activityTypeRaw: declaredActivityTypeRaw)
         launchWatchWorkoutSession()
+#endif
+    }
+
+    /// What the watch should record this session as, sent with the ready signal and every state
+    /// so it doesn't hinge on the `startWatchApp` handoff arriving first.
+    private var declaredActivityTypeRaw: UInt? {
+#if canImport(HealthKit)
+        routine.resolvedActivityType(intention: intention).rawValue
+#else
+        nil
 #endif
     }
 
@@ -1558,7 +1596,8 @@ struct SavedRoutinePlayerView: View {
             nextExerciseName: nextStep?.label,
             isPlaying: isPlaying,
             isPaused: isPaused,
-            sideLabel: step?.sideLabel
+            sideLabel: step?.sideLabel,
+            activityTypeRaw: declaredActivityTypeRaw
         )
         connectivityManager.sendWorkoutState(state)
 #endif

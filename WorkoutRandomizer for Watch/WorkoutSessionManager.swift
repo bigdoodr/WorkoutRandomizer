@@ -32,12 +32,31 @@ class WorkoutSessionManager: NSObject, ObservableObject {
     /// session, so launching the watch app doesn't record a session prematurely.
     private(set) var preparedConfiguration: HKWorkoutConfiguration?
 
+    /// Activity type the iPhone declared in its latest workout state / ready signal. Refreshed
+    /// every time one arrives, so it's the freshest word on what this session is — and it
+    /// doesn't depend on the one-shot `startWatchApp` handoff having landed first.
+    private var declaredActivityTypeRaw: UInt?
+
     func prepare(configuration: HKWorkoutConfiguration) {
         preparedConfiguration = configuration
     }
 
+    func declareActivityType(_ raw: UInt) {
+        declaredActivityTypeRaw = raw
+    }
+
     func clearPreparedConfiguration() {
         preparedConfiguration = nil
+        declaredActivityTypeRaw = nil
+    }
+
+    private func declaredConfiguration() -> HKWorkoutConfiguration? {
+        guard let raw = declaredActivityTypeRaw,
+              let type = HKWorkoutActivityType(rawValue: raw) else { return nil }
+        let config = HKWorkoutConfiguration()
+        config.activityType = type
+        config.locationType = .indoor
+        return config
     }
     
     private override init() {
@@ -76,7 +95,9 @@ class WorkoutSessionManager: NSObject, ObservableObject {
         isStartingSession = true
         defer { isStartingSession = false }
 
-        let config = configuration ?? preparedConfiguration ?? defaultConfiguration()
+        // Explicit config first; then what the iPhone most recently declared; then the stashed
+        // handoff config; HIIT only when the watch was started with no word from the phone.
+        let config = configuration ?? declaredConfiguration() ?? preparedConfiguration ?? defaultConfiguration()
         
         // Request authorization first
         let authorized = await requestAuthorization()

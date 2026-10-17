@@ -729,7 +729,8 @@ struct WorkoutPlayerView: View {
             isRest: isRest,
             nextExerciseName: currentIndex + 1 < routine.count ? routine[currentIndex + 1].name : nil,
             isPlaying: isPlaying,
-            isPaused: isPaused
+            isPaused: isPaused,
+            activityTypeRaw: resolvedActivityType.rawValue
         )
         connectivityManager.sendWorkoutState(state)
         #endif
@@ -799,7 +800,7 @@ struct WorkoutPlayerView: View {
 #if os(iOS)
         guard !isPlaying else { return }
         connectivityManager.watchRequestedStart = false
-        connectivityManager.sendPrepareToStart()
+        connectivityManager.sendPrepareToStart(activityTypeRaw: resolvedActivityType.rawValue)
         launchWatchWorkoutSession()
 #endif
     }

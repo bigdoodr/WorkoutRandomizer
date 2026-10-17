@@ -897,7 +897,7 @@ struct StretchPlayerView: View {
 #if os(iOS)
         guard !isPlaying else { return }
         connectivityManager.watchRequestedStart = false
-        connectivityManager.sendPrepareToStart()
+        connectivityManager.sendPrepareToStart(activityTypeRaw: HKWorkoutActivityType.flexibility.rawValue)
         launchWatchWorkoutSession()
 #endif
     }
@@ -1129,7 +1129,8 @@ struct StretchPlayerView: View {
             nextExerciseName: isTransitioning ? currentStretch?.name : nextName,
             isPlaying: isPlaying,
             isPaused: isPaused,
-            sideLabel: sideLabel
+            sideLabel: sideLabel,
+            activityTypeRaw: HKWorkoutActivityType.flexibility.rawValue
         )
         connectivityManager.sendWorkoutState(state)
         #endif

@@ -37,6 +37,9 @@ struct WorkoutState: Codable {
     /// e.g. "Left Side" / "Right Side" for single-sided stretches. Optional so
     /// old payloads still decode.
     var sideLabel: String? = nil
+    /// `HKWorkoutActivityType` raw value the watch should record this session as. Carried with
+    /// every state so a missed `startWatchApp` handoff doesn't fall back to the HIIT default.
+    var activityTypeRaw: UInt? = nil
 }
 
 // MARK: - Health Metrics (Watch → iPhone only)

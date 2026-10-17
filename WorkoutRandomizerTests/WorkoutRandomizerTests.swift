@@ -168,6 +168,14 @@ struct ActivityTypeTests {
         #expect(!routine(kind: nil, moveType: .move).isFlexibilitySession)
     }
 
+    @Test func sideStepsShareTheBaseExercisesVideo() throws {
+        let entry = try #require(ExerciseCatalog.shared.videoPaths.first)
+        let videos = VideoManager.shared
+        #expect(videos.path(for: "\(entry.key) (Left)") == entry.value)
+        #expect(videos.path(for: "\(entry.key) (Right)") == entry.value)
+        #expect(videos.path(for: "Definitely Not An Exercise (Left)") == nil)
+    }
+
     @Test func preloadedRoutinesAreRecordedAsDescribed() {
         #expect(PreloadedRoutines.morningStretches.resolvedActivityType(intention: .hiit) == .flexibility)
         #expect(PreloadedRoutines.bedtimeStretches.resolvedActivityType(intention: .hiit) == .flexibility)
