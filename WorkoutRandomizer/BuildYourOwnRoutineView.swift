@@ -61,6 +61,7 @@ struct BuildYourOwnRoutineView: View {
 
     @State private var routineName = ""
     @State private var routineDescription = ""
+    @State private var category = ""
     @State private var selectedColorName = "purple"
     @State private var selectedIcon = "figure.mixed.cardio"
     @State private var showingPicker = false
@@ -93,6 +94,14 @@ struct BuildYourOwnRoutineView: View {
                 Section("Name") {
                     TextField("Routine Name", text: $routineName)
                     TextField("Description (optional)", text: $routineDescription, axis: .vertical)
+                }
+
+                Section {
+                    CategoryField(text: $category)
+                } header: {
+                    Text("Folder")
+                } footer: {
+                    Text("Where it's filed in the Saved tab. Leave blank for Uncategorized.")
                 }
 
                 Section("Appearance") {
@@ -310,7 +319,8 @@ struct BuildYourOwnRoutineView: View {
             sourceURL: "",
             exercises: queue.items,
             accentColorName: selectedColorName,
-            systemImage: selectedIcon
+            systemImage: selectedIcon,
+            category: RoutineFolders.normalizedName(category)
         )
         SavedRoutineStore.shared.save(routine)
         queue.clear()

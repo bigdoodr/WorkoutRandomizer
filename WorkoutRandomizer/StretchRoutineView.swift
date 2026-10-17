@@ -32,6 +32,10 @@ struct StretchRoutineView: View {
     @State private var bothSidesMode: Bool = true
     @State private var generatedStretches: [Exercise] = []
     @State private var showingPlayer = false
+    @State private var showingSave = false
+    @State private var showSaveConfirmation = false
+    @State private var confirmSaveAfterDismiss = false
+    @State private var savedFolderName = ""
 
     private let holdDurationOptions = [10, 15, 20, 30]
 
@@ -301,6 +305,38 @@ struct StretchRoutineView: View {
                             .foregroundStyle(.white)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
+
+                        Button {
+                            showingSave = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "bookmark.fill")
+                                Text("Save")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(.purple)
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .sheet(isPresented: $showingSave, onDismiss: {
+                            // Presenting the alert while the sheet is still leaving can drop it.
+                            if confirmSaveAfterDismiss {
+                                confirmSaveAfterDismiss = false
+                                showSaveConfirmation = true
+                            }
+                        }) {
+                            SaveRoutinePromptView(title: "Save Stretch Routine", initialName: defaultSaveName) { name, category in
+                                SavedRoutineStore.shared.save(makeSavedRoutine(name: name, category: category))
+                                savedFolderName = category ?? RoutineFolders.uncategorizedName
+                                confirmSaveAfterDismiss = true
+                            }
+                        }
+                        .alert("Routine Saved", isPresented: $showSaveConfirmation) {
+                            Button("OK") { }
+                        } message: {
+                            Text("Saved to \"\(savedFolderName)\" in the Saved tab.")
+                        }
                     }
                 }
             }
@@ -319,6 +355,41 @@ struct StretchRoutineView: View {
                 selectedCategories = [first]
             }
         }
+    }
+
+    private var defaultSaveName: String {
+        let label = selectedCategories.sorted().prefix(2).joined(separator: " & ")
+        guard !label.isEmpty else { return "My Stretch Routine" }
+        // "Morning Stretches" already says it.
+        return label.localizedCaseInsensitiveContains("stretch") ? label : "\(label) Stretch"
+    }
+
+    /// Flattens the preview into the saved-routine shape the way the stretch player runs it: one
+    /// hold per stretch (two sides when Both Sides is on and the stretch is single-sided), with
+    /// the player's short transition between stretches as the rest.
+    private func makeSavedRoutine(name: String, category: String?) -> SavedWorkoutRoutine {
+        let count = generatedStretches.count
+        let exercises = generatedStretches.enumerated().map { index, stretch in
+            SavedRoutineExercise(
+                name: stretch.name,
+                duration: holdDuration,
+                restDuration: index < count - 1 ? StretchPlayerView.transitionDuration : 0,
+                singleSided: bothSidesMode && stretch.singleSided,
+                restAfterEachSide: false,
+                moveType: stretch.isMovement ? .move : .hold
+            )
+        }
+        return SavedWorkoutRoutine(
+            name: name,
+            routineDescription: "",
+            source: "My Routines",
+            sourceURL: "",
+            exercises: exercises,
+            accentColorName: "teal",
+            systemImage: "figure.flexibility",
+            category: category,
+            kind: .stretch
+        )
     }
 
     private func generateStretches() {

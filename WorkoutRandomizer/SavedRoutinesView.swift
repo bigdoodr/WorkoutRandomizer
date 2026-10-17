@@ -47,6 +47,14 @@ struct SavedRoutineExercise: Identifiable, Codable {
     }
 }
 
+/// What kind of session a routine is, when that can't be inferred from its exercises. Stretch
+/// routines mix holds and moving drills (Cat-Cow), so the hold-vs-move ratio alone would misfile
+/// them as a workout when recording to Apple Health.
+enum SavedRoutineKind: String, Codable {
+    case workout
+    case stretch
+}
+
 struct SavedWorkoutRoutine: Identifiable, Codable {
     var id = UUID()
     let name: String
@@ -56,6 +64,10 @@ struct SavedWorkoutRoutine: Identifiable, Codable {
     let exercises: [SavedRoutineExercise]
     let accentColorName: String
     let systemImage: String
+    /// The folder this routine is filed under. Optional (not defaulted) so routines saved by
+    /// earlier versions still decode: nil reads as Uncategorized.
+    var category: String? = nil
+    var kind: SavedRoutineKind? = nil
 
     var accentColor: Color {
         switch accentColorName {
@@ -93,6 +105,7 @@ struct SavedWorkoutRoutine: Identifiable, Codable {
     /// `WorkoutPlayerView.resolvedActivityType`.
     func resolvedActivityType(intention: WorkoutIntention) -> HKWorkoutActivityType {
         guard !exercises.isEmpty else { return .other }
+        if kind == .stretch { return .flexibility }
         let holdFraction = Double(exercises.filter { $0.moveType == .hold }.count) / Double(exercises.count)
         if holdFraction >= 0.8 { return .flexibility }
         switch intention {
@@ -101,6 +114,95 @@ struct SavedWorkoutRoutine: Identifiable, Codable {
         }
     }
 #endif
+}
+
+// MARK: - Folders
+
+/// A folder is not stored anywhere — it's just the set of routines that share a category name.
+/// So a folder exists only while it has routines (built-in ones always do), and there's nothing
+/// to keep in sync when a routine is saved, moved, or deleted.
+struct RoutineFolder: Identifiable {
+    let name: String
+    let routines: [SavedWorkoutRoutine]
+    let isBuiltIn: Bool
+
+    var id: String { RoutineFolders.key(name) }
+    var isUncategorized: Bool { id == RoutineFolders.key(RoutineFolders.uncategorizedName) }
+}
+
+enum RoutineFolders {
+    static let uncategorizedName = "Uncategorized"
+    /// Built-in folders always appear, and a user routine saved under the same name joins them.
+    static let builtInNames = ["Stretches", "Core"]
+
+    /// Comparison key: case-, spacing- and edge-whitespace-insensitive, so "core", "Core " and
+    /// "CORE" all land in one folder instead of three.
+    static func key(_ name: String) -> String {
+        name.split(whereSeparator: \.isWhitespace).joined(separator: " ").lowercased()
+    }
+
+    /// The tidied spelling to store, or nil when there's nothing to file under (blank, or the
+    /// literal "Uncategorized", which is what nil already means).
+    static func normalizedName(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let tidy = raw.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !tidy.isEmpty, key(tidy) != key(uncategorizedName) else { return nil }
+        return tidy
+    }
+
+    /// Built-in folders (fixed order) and user folders (alphabetical, Uncategorized last, only
+    /// when non-empty). Within a folder, built-in routines come first. A folder's display name
+    /// is the first spelling seen, except built-ins, which always use their canonical name.
+    static func folders(
+        preloaded: [SavedWorkoutRoutine],
+        user: [SavedWorkoutRoutine]
+    ) -> (builtIn: [RoutineFolder], user: [RoutineFolder]) {
+        var names: [String: String] = [:]
+        var buckets: [String: [SavedWorkoutRoutine]] = [:]
+        for routine in preloaded + user {
+            let display = normalizedName(routine.category) ?? uncategorizedName
+            let k = key(display)
+            if names[k] == nil { names[k] = display }
+            buckets[k, default: []].append(routine)
+        }
+
+        let builtInKeys = Set(builtInNames.map { key($0) })
+        let uncategorizedKey = key(uncategorizedName)
+
+        let builtIn = builtInNames.map {
+            RoutineFolder(name: $0, routines: buckets[key($0)] ?? [], isBuiltIn: true)
+        }
+        var userFolders = buckets.keys
+            .filter { !builtInKeys.contains($0) && $0 != uncategorizedKey }
+            .sorted { (names[$0] ?? "").localizedCaseInsensitiveCompare(names[$1] ?? "") == .orderedAscending }
+            .map { RoutineFolder(name: names[$0] ?? $0, routines: buckets[$0] ?? [], isBuiltIn: false) }
+        if let loose = buckets[uncategorizedKey], !loose.isEmpty {
+            userFolders.append(RoutineFolder(name: uncategorizedName, routines: loose, isBuiltIn: false))
+        }
+        return (builtIn, userFolders)
+    }
+
+    /// Names worth offering as one-tap choices when filing a routine.
+    static func suggestedNames(user: [SavedWorkoutRoutine]) -> [String] {
+        let grouped = folders(preloaded: [], user: user)
+        return builtInNames + grouped.user.filter { !$0.isUncategorized }.map(\.name)
+    }
+
+    static func renaming(_ routines: [SavedWorkoutRoutine], from old: String, to new: String) -> [SavedWorkoutRoutine] {
+        let oldKey = key(old)
+        let newName = normalizedName(new)
+        return routines.map { routine in
+            guard key(normalizedName(routine.category) ?? uncategorizedName) == oldKey else { return routine }
+            var moved = routine
+            moved.category = newName
+            return moved
+        }
+    }
+
+    static func removing(_ routines: [SavedWorkoutRoutine], category: String) -> [SavedWorkoutRoutine] {
+        let target = key(category)
+        return routines.filter { key(normalizedName($0.category) ?? uncategorizedName) != target }
+    }
 }
 
 // MARK: - Saved Routine Store
@@ -134,6 +236,27 @@ final class SavedRoutineStore {
         persist()
     }
 
+    func delete(id: UUID) {
+        routines.removeAll { $0.id == id }
+        persist()
+    }
+
+    func move(_ id: UUID, toCategory category: String?) {
+        guard let idx = routines.firstIndex(where: { $0.id == id }) else { return }
+        routines[idx].category = RoutineFolders.normalizedName(category)
+        persist()
+    }
+
+    func renameCategory(from old: String, to new: String) {
+        routines = RoutineFolders.renaming(routines, from: old, to: new)
+        persist()
+    }
+
+    func deleteCategory(_ category: String) {
+        routines = RoutineFolders.removing(routines, category: category)
+        persist()
+    }
+
     private func persist() {
         if let data = try? JSONEncoder().encode(routines) {
             UserDefaults.standard.set(data, forKey: Self.storageKey)
@@ -159,7 +282,9 @@ enum PreloadedRoutines {
             SavedRoutineExercise(name: "London Bridge",         duration: 30, singleSided: true,  moveType: .move),
         ],
         accentColorName: "yellow",
-        systemImage: "sunrise.fill"
+        systemImage: "sunrise.fill",
+        category: "Stretches",
+        kind: .stretch
     )
 
     static let bedtimeStretches = SavedWorkoutRoutine(
@@ -175,7 +300,9 @@ enum PreloadedRoutines {
             SavedRoutineExercise(name: "Supine Spinal Twist",           duration: 30, singleSided: true,  moveType: .hold),
         ],
         accentColorName: "indigo",
-        systemImage: "moon.stars.fill"
+        systemImage: "moon.stars.fill",
+        category: "Stretches",
+        kind: .stretch
     )
 
     static let absWorkout = SavedWorkoutRoutine(
@@ -194,47 +321,90 @@ enum PreloadedRoutines {
             SavedRoutineExercise(name: "Corpse Crunch",          duration: 45, restDuration: 0,  singleSided: false, restAfterEachSide: false, moveType: .move),
         ],
         accentColorName: "orange",
-        systemImage: "figure.core.training"
+        systemImage: "figure.core.training",
+        category: "Core",
+        kind: .workout
     )
 }
 
 // MARK: - Saved Routines List
 
+extension SavedWorkoutRoutine {
+    /// The same routine under a new name and folder (name and category are fixed at creation).
+    func filed(name: String, category: String?) -> SavedWorkoutRoutine {
+        SavedWorkoutRoutine(
+            id: id,
+            name: name,
+            routineDescription: routineDescription,
+            source: source,
+            sourceURL: sourceURL,
+            exercises: exercises,
+            accentColorName: accentColorName,
+            systemImage: systemImage,
+            category: RoutineFolders.normalizedName(category),
+            kind: kind
+        )
+    }
+}
+
 struct SavedRoutinesView: View {
-    private let preloaded = PreloadedRoutines.all
     @State private var store = SavedRoutineStore.shared
     @State private var showingBuilder = false
+    @State private var folderToRename: RoutineFolder?
+    @State private var renameText = ""
+    @State private var folderToDelete: RoutineFolder?
 
     var body: some View {
+        let grouped = RoutineFolders.folders(preloaded: PreloadedRoutines.all, user: store.routines)
         List {
-            Section {
-                ForEach(preloaded) { routine in
-                    NavigationLink(destination: SavedRoutineDetailView(routine: routine)) {
-                        RoutineRow(routine: routine)
+            Section("Built-in") {
+                ForEach(grouped.builtIn) { folder in
+                    NavigationLink {
+                        SavedFolderView(folderID: folder.id)
+                    } label: {
+                        FolderRow(folder: folder)
                     }
-                }
-            } header: {
-                Text("Athlean-X Routines")
-            } footer: {
-                if store.routines.isEmpty {
-                    Text("Save any generated workout to \"My Routines\" using the bookmark button.")
-                        .font(.caption)
                 }
             }
 
-            if !store.routines.isEmpty {
-                Section("My Routines") {
-                    ForEach(store.routines) { routine in
-                        NavigationLink(destination: SavedRoutineDetailView(routine: routine)) {
-                            RoutineRow(routine: routine)
+            Section {
+                if grouped.user.isEmpty {
+                    Text("Save a generated workout, a stretch routine, or one you build yourself and it shows up here, in the folder you choose.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(grouped.user) { folder in
+                    NavigationLink {
+                        SavedFolderView(folderID: folder.id)
+                    } label: {
+                        FolderRow(folder: folder)
+                    }
+                    .swipeActions(edge: .leading) {
+                        if !folder.isUncategorized {
+                            Button {
+                                renameText = folder.name
+                                folderToRename = folder
+                            } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
+                            .tint(.blue)
                         }
                     }
-                    .onDelete { offsets in store.delete(at: offsets) }
                 }
+                .onDelete { offsets in
+                    if let index = offsets.first { folderToDelete = grouped.user[index] }
+                }
+            } header: {
+                Text("My Routines")
             }
         }
         .navigationTitle("Saved Routines")
         .toolbar {
+#if os(iOS)
+            ToolbarItem(placement: .topBarLeading) {
+                EditButton()
+            }
+#endif
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showingBuilder = true
@@ -246,6 +416,238 @@ struct SavedRoutinesView: View {
         .sheet(isPresented: $showingBuilder) {
             BuildYourOwnRoutineView()
         }
+        .alert("Rename Folder", isPresented: Binding(
+            get: { folderToRename != nil },
+            set: { if !$0 { folderToRename = nil } }
+        )) {
+            TextField("Folder name", text: $renameText)
+            Button("Cancel", role: .cancel) { }
+            Button("Rename") {
+                if let folder = folderToRename,
+                   RoutineFolders.normalizedName(renameText) != nil {
+                    store.renameCategory(from: folder.name, to: renameText)
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete this folder?",
+            isPresented: Binding(
+                get: { folderToDelete != nil },
+                set: { if !$0 { folderToDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: folderToDelete
+        ) { folder in
+            Button("Delete \"\(folder.name)\" and \(folder.routines.count) routine\(folder.routines.count == 1 ? "" : "s")", role: .destructive) {
+                store.deleteCategory(folder.name)
+            }
+        }
+    }
+}
+
+private struct FolderRow: View {
+    let folder: RoutineFolder
+
+    private var tint: Color {
+        switch folder.name {
+        case "Stretches" where folder.isBuiltIn: return .teal
+        case "Core" where folder.isBuiltIn: return .orange
+        default: return folder.isUncategorized ? .gray : .indigo
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(tint)
+                .frame(width: 44, height: 44)
+                .overlay {
+                    Image(systemName: "folder.fill")
+                        .foregroundStyle(.white)
+                        .font(.title3)
+                }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(folder.name)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Text("\(folder.routines.count) routine\(folder.routines.count == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// The routines in one folder. Looked up by id on every render rather than handed a snapshot,
+/// so deleting or moving a routine updates the list — and a folder that empties out closes.
+struct SavedFolderView: View {
+    let folderID: String
+    @State private var store = SavedRoutineStore.shared
+    @State private var routineToMove: SavedWorkoutRoutine?
+    @Environment(\.dismiss) private var dismiss
+
+    private var folder: RoutineFolder? {
+        let grouped = RoutineFolders.folders(preloaded: PreloadedRoutines.all, user: store.routines)
+        return (grouped.builtIn + grouped.user).first { $0.id == folderID }
+    }
+
+    private func isBuiltIn(_ routine: SavedWorkoutRoutine) -> Bool {
+        PreloadedRoutines.all.contains { $0.id == routine.id }
+    }
+
+    var body: some View {
+        let current = folder
+        List {
+            if let current, !current.routines.isEmpty {
+                ForEach(current.routines) { routine in
+                    NavigationLink(destination: SavedRoutineDetailView(routine: routine)) {
+                        RoutineRow(routine: routine)
+                    }
+                    .swipeActions(edge: .trailing) {
+                        if !isBuiltIn(routine) {
+                            Button(role: .destructive) {
+                                store.delete(id: routine.id)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                    .contextMenu {
+                        if !isBuiltIn(routine) {
+                            Button {
+                                routineToMove = routine
+                            } label: {
+                                Label("Change Folder…", systemImage: "folder")
+                            }
+                            Button(role: .destructive) {
+                                store.delete(id: routine.id)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("No routines in this folder.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle(current?.name ?? "Folder")
+#if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
+        .onChange(of: current == nil) { _, isGone in
+            if isGone { dismiss() }
+        }
+        .sheet(item: $routineToMove) { routine in
+            SaveRoutinePromptView(
+                title: "Change Folder",
+                initialName: routine.name,
+                initialCategory: routine.category ?? "",
+                showsName: false,
+                confirmLabel: "Move"
+            ) { _, category in
+                store.move(routine.id, toCategory: category)
+            }
+        }
+    }
+}
+
+/// Free-text folder field with the existing folders offered as one-tap choices, so reusing a
+/// folder doesn't depend on retyping its name exactly.
+struct CategoryField: View {
+    @Binding var text: String
+    @State private var store = SavedRoutineStore.shared
+
+    var body: some View {
+        TextField("Folder (optional)", text: $text)
+#if os(iOS)
+            .textInputAutocapitalization(.words)
+#endif
+        let suggestions = RoutineFolders.suggestedNames(user: store.routines)
+        OverflowScrollRow(items: suggestions) { name in
+            let isSelected = RoutineFolders.key(text) == RoutineFolders.key(name)
+            Button { text = name } label: {
+                Text(name)
+                    .font(.subheadline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(isSelected ? Color.blue : Color.gray.opacity(0.15))
+                    .foregroundStyle(isSelected ? .white : .primary)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+/// "Save as Routine" prompt: a name and an optional folder. Also reused, without the name
+/// field, to move an existing routine to another folder.
+struct SaveRoutinePromptView: View {
+    let title: String
+    var showsName = true
+    var confirmLabel = "Save"
+    let onSave: (String, String?) -> Void
+
+    @State private var name: String
+    @State private var category: String
+    @Environment(\.dismiss) private var dismiss
+
+    init(
+        title: String,
+        initialName: String,
+        initialCategory: String = "",
+        showsName: Bool = true,
+        confirmLabel: String = "Save",
+        onSave: @escaping (String, String?) -> Void
+    ) {
+        self.title = title
+        self.showsName = showsName
+        self.confirmLabel = confirmLabel
+        self.onSave = onSave
+        _name = State(initialValue: initialName)
+        _category = State(initialValue: initialCategory)
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if showsName {
+                    Section("Name") {
+                        TextField("Routine Name", text: $name)
+                    }
+                }
+                Section {
+                    CategoryField(text: $category)
+                } header: {
+                    Text("Folder")
+                } footer: {
+                    Text("Leave blank to file it under Uncategorized.")
+                }
+            }
+            .navigationTitle(title)
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(confirmLabel) {
+                        onSave(trimmedName, RoutineFolders.normalizedName(category))
+                        dismiss()
+                    }
+                    .disabled(showsName && trimmedName.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

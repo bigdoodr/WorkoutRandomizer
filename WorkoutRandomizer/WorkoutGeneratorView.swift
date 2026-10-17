@@ -64,14 +64,24 @@ struct WorkoutGeneratorView: View {
     private enum ActiveSheet: Identifiable, Equatable {
         case guide(TutorialView.Mode)
         case intentionInfo
+        /// Name-and-folder prompt for this routine. The routine travels inside the case so the
+        /// sheet's content never depends on a second piece of state being set in time — reading
+        /// separate state from the sheet closure showed a blank sheet on the first tap.
+        case saveRoutine(SavedWorkoutRoutine)
 
         var id: String {
             switch self {
             case .guide(let mode): return "guide-\(mode.id)"
             case .intentionInfo: return "intentionInfo"
+            case .saveRoutine: return "saveRoutine"
             }
         }
+
+        static func == (lhs: ActiveSheet, rhs: ActiveSheet) -> Bool { lhs.id == rhs.id }
     }
+    /// Where the last save landed, for the confirmation message.
+    @State private var savedFolderName = ""
+    @State private var confirmSaveAfterDismiss = false
     @State private var customExerciseStore = CustomExerciseStore.shared
     @State private var favorites = FavoritesStore.shared
     @State private var favoritesOnly = false
@@ -1140,19 +1150,31 @@ struct WorkoutGeneratorView: View {
         // One sheet for the guide and the intention explainer, so the two can never both try to
         // present. The video-mode prompt waits until neither is on screen.
         .sheet(item: $activeSheet, onDismiss: {
-            promptForVideoModeIfNeeded()
+            if confirmSaveAfterDismiss {
+                // Presenting the alert while the sheet is still leaving can drop it.
+                confirmSaveAfterDismiss = false
+                showSaveConfirmation = true
+            } else {
+                promptForVideoModeIfNeeded()
+            }
         }) { sheet in
             switch sheet {
             case .guide(let mode):
                 TutorialView(mode: mode)
             case .intentionInfo:
                 IntentionInfoView()
+            case .saveRoutine(let routine):
+                SaveRoutinePromptView(title: "Save as Routine", initialName: routine.name) { name, category in
+                    SavedRoutineStore.shared.save(routine.filed(name: name, category: category))
+                    savedFolderName = category ?? RoutineFolders.uncategorizedName
+                    confirmSaveAfterDismiss = true
+                }
             }
         }
         .alert("Routine Saved", isPresented: $showSaveConfirmation) {
             Button("OK") { }
         } message: {
-            Text("This workout has been added to My Routines in the Saved Routines tab.")
+            Text("Saved to \"\(savedFolderName)\" in the Saved tab.")
         }
         .fileExporter(
             isPresented: $showingExporter,
@@ -1778,7 +1800,14 @@ struct WorkoutGeneratorView: View {
                 ))
             }
         }
-        let focusLabel = selectedFocusAreas.sorted().prefix(2).joined(separator: " & ")
+        // Sub-areas ("Core: Strength") are named for their parent so the title doesn't read
+        // "Core & Core: Strength Workout".
+        var seenAreas = Set<String>()
+        let focusLabel = selectedFocusAreas.sorted()
+            .map { $0.components(separatedBy: ":").first ?? $0 }
+            .filter { seenAreas.insert($0).inserted }
+            .prefix(2)
+            .joined(separator: " & ")
         let routineName = focusLabel.isEmpty ? "My Workout" : "\(focusLabel) Workout"
         let routine = SavedWorkoutRoutine(
             name: routineName,
@@ -1789,8 +1818,7 @@ struct WorkoutGeneratorView: View {
             accentColorName: "purple",
             systemImage: "dumbbell.fill"
         )
-        SavedRoutineStore.shared.save(routine)
-        showSaveConfirmation = true
+        activeSheet = .saveRoutine(routine)
     }
 
     private func importWorkout(from document: WorkoutDocument) {
