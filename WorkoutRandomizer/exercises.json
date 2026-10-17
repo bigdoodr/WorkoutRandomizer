@@ -49,7 +49,7 @@
         },
         {
           "name": "Hand Release Push-Ups",
-          "videoPath": "/resources/handReleasePushups.mp4",
+          "videoPath": "/resources/HandReleasePushups.mp4",
           "equipment": [
             "None"
           ]
@@ -65,14 +65,14 @@
         },
         {
           "name": "Clapping Plyo Push-Ups",
-          "videoPath": "/resources/clappingPlyoPushups.mp4",
+          "videoPath": "/resources/ClappingPlyoPushups.mp4",
           "equipment": [
             "None"
           ]
         },
         {
           "name": "Superhuman Push-Ups",
-          "videoPath": "/resources/superhumanPushups.mp4",
+          "videoPath": "/resources/SuperhumanPushups.mp4",
           "equipment": [
             "None"
           ]
@@ -185,7 +185,7 @@
         },
         {
           "name": "Lateral Leaps and Tuck Jumps",
-          "videoPath": "/resources/lateralLeapsAndTuckJumps.mp4",
+          "videoPath": "/resources/LateralLeapsAndTuckJumps.mp4",
           "equipment": [
             "None"
           ],
@@ -228,7 +228,7 @@
         },
         {
           "name": "Standing Alternating Reverse Lunges",
-          "videoPath": "/resources/altRevLungesStanding.mp4",
+          "videoPath": "/resources/AltRevLungesStanding.mp4",
           "equipment": [
             "None"
           ]
@@ -245,49 +245,49 @@
         },
         {
           "name": "Alternating Reverse Lunge to Chest Opener",
-          "videoPath": "/resources/altRevLunge2ChestOpener.mp4",
+          "videoPath": "/resources/AltRevLunge2ChestOpener.mp4",
           "equipment": [
             "None"
           ]
         },
         {
           "name": "High Alternating Reverse Lunges",
-          "videoPath": "/resources/altRevLungesHigh.mp4",
+          "videoPath": "/resources/AltRevLungesHigh.mp4",
           "equipment": [
             "None"
           ]
         },
         {
           "name": "Low Alternating Reverse Lunges",
-          "videoPath": "/resources/altRevLungesLow.mp4",
+          "videoPath": "/resources/AltRevLungesLow.mp4",
           "equipment": [
             "None"
           ]
         },
         {
           "name": "Hip Switch Ratchet Squats",
-          "videoPath": "/resources/hipSwitchRatchetSquats.mp4",
+          "videoPath": "/resources/HipSwitchRatchetSquats.mp4",
           "equipment": [
             "None"
           ]
         },
         {
           "name": "Squat to Curtsy Lunge",
-          "videoPath": "/resources/squat2CurtsyLunge.mp4",
+          "videoPath": "/resources/Squat2CurtsyLunge.mp4",
           "equipment": [
             "None"
           ]
         },
         {
           "name": "Squat to Hip Opener",
-          "videoPath": "/resources/squat2HipOpener.mp4",
+          "videoPath": "/resources/Squat2HipOpener.mp4",
           "equipment": [
             "None"
           ]
         },
         {
           "name": "Squat to Knee Hold",
-          "videoPath": "/resources/squat2KneeHold.mp4",
+          "videoPath": "/resources/Squat2KneeHold.mp4",
           "equipment": [
             "None"
           ]
@@ -323,7 +323,7 @@
         },
         {
           "name": "Shoulder Tap Pike Push-Ups",
-          "videoPath": "/resources/shoulderTapPikePushups.mp4",
+          "videoPath": "/resources/ShoulderTapPikePushups.mp4",
           "equipment": [
             "None"
           ]
@@ -361,7 +361,7 @@
       "Hard": [
         {
           "name": "Diamond Push-Ups",
-          "videoPath": "/resources/diamondPushups.mp4",
+          "videoPath": "/resources/DiamondPushups.mp4",
           "equipment": [
             "None"
           ]
@@ -436,21 +436,21 @@
         },
         {
           "name": "Ab Halos",
-          "videoPath": "/resources/abHalos.mp4",
+          "videoPath": "/resources/AbHalos.mp4",
           "equipment": [
             "None"
           ]
         },
         {
           "name": "Crunch and Reach Table Top",
-          "videoPath": "/resources/crunchAndReachTableTop.mp4",
+          "videoPath": "/resources/CrunchAndReachTableTop.mp4",
           "equipment": [
             "None"
           ]
         },
         {
           "name": "Reverse Corkscrews",
-          "videoPath": "/resources/reverseCorkscrews.mp4",
+          "videoPath": "/resources/ReverseCorkscrews.mp4",
           "equipment": [
             "None"
           ]
@@ -504,7 +504,7 @@
         },
         {
           "name": "Sprinter Sit-Ups",
-          "videoPath": "/resources/sprinterSitUps.mp4",
+          "videoPath": "/resources/SprinterSitUps.mp4",
           "equipment": [
             "None"
           ]
@@ -520,7 +520,7 @@
         },
         {
           "name": "Crunch and Reach Legs High",
-          "videoPath": "/resources/crunchAndReachLegsHigh.mp4",
+          "videoPath": "/resources/CrunchAndReachLegsHigh(Adv).mp4",
           "equipment": [
             "None"
           ]
@@ -676,7 +676,7 @@
         },
         {
           "name": "Ankle Tap Runs",
-          "videoPath": "/resources/ankleTapRuns.mp4",
+          "videoPath": "/resources/AnkleTapRuns.mp4",
           "equipment": [
             "None"
           ]
@@ -685,14 +685,14 @@
       "Hard": [
         {
           "name": "Air Ball Ankle Juggle Run",
-          "videoPath": "/resources/airBallAnkleJuggleRun.mp4",
+          "videoPath": "/resources/AirBallAnkleJuggleRun.mp4",
           "equipment": [
             "None"
           ]
         },
         {
           "name": "High Knee Skier Hops",
-          "videoPath": "/resources/highKneeSkierHops.mp4",
+          "videoPath": "/resources/HighKneeSkierHops.mp4",
           "equipment": [
             "None"
           ]
@@ -1381,7 +1381,7 @@
         },
         {
           "name": "Diagonal Hip Hinge to Tip Toe Reach",
-          "videoPath": "/resources/diagHipHinge2TipToeReach.mp4",
+          "videoPath": "/resources/DiagHipHinge2TipToeReach.mp4",
           "equipment": [
             "None"
           ],
