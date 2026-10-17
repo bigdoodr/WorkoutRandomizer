@@ -49,10 +49,41 @@ struct SavedRoutineExercise: Identifiable, Codable {
 
 /// What kind of session a routine is, when that can't be inferred from its exercises. Stretch
 /// routines mix holds and moving drills (Cat-Cow), so the hold-vs-move ratio alone would misfile
-/// them as a workout when recording to Apple Health.
+/// them as a workout when recording to Apple Health. `core` and `cardio` remember that a saved
+/// workout was built from only those focus areas, which is what the live generator logs it by.
 enum SavedRoutineKind: String, Codable {
     case workout
     case stretch
+    case core
+    case cardio
+
+    private static let coreAreas: Set<String> = ["Core", "Core: Strength"]
+    private static let cardioAreas: Set<String> = ["Cardio"]
+    private static let stretchAreas: Set<String> = [
+        "Morning Stretches", "Evening Recovery", "Cool Down", "Warm-Up: Hips", "Warm-Up: Full Body"
+    ]
+
+    /// The kind a generated session falls into, from the focus areas that built it. Anything
+    /// that isn't purely one of these is a general workout, logged by its Intention instead.
+    static func forFocusAreas(_ areas: Set<String>) -> SavedRoutineKind {
+        guard !areas.isEmpty else { return .workout }
+        if areas.isSubset(of: coreAreas) { return .core }
+        if areas.isSubset(of: cardioAreas) { return .cardio }
+        if areas.isSubset(of: stretchAreas) { return .stretch }
+        return .workout
+    }
+
+#if canImport(HealthKit)
+    /// The activity this kind is always logged as, or nil when the Intention decides.
+    var healthKitActivityType: HKWorkoutActivityType? {
+        switch self {
+        case .stretch: return .flexibility
+        case .core: return .coreTraining
+        case .cardio: return .mixedCardio
+        case .workout: return nil
+        }
+    }
+#endif
 }
 
 struct SavedWorkoutRoutine: Identifiable, Codable {
@@ -97,21 +128,26 @@ struct SavedWorkoutRoutine: Identifiable, Codable {
         return sec == 0 ? "\(m) min" : "\(m)m \(sec)s"
     }
 
+    /// True for a stretch/mobility session. A routine tagged with a kind says so outright; an
+    /// untagged one (built by hand, or saved before kinds existed) is judged by its hold-vs-move
+    /// ratio — mostly holds reads as stretching. Stretch sessions have no Intention and no HR-zone
+    /// target, so the detail screen and recap leave both out.
+    var isFlexibilitySession: Bool {
+        guard !exercises.isEmpty else { return false }
+        if let kind { return kind == .stretch }
+        let holds = exercises.filter { $0.moveType == .hold }.count
+        return Double(holds) / Double(exercises.count) >= 0.8
+    }
+
 #if canImport(HealthKit)
-    /// Classifies the routine for HealthKit. Saved/built routines don't carry the generator's
-    /// focus-area tags, so this falls back to a simple hold-vs-move ratio (mostly holds reads as
-    /// a stretch session, matching the preloaded stretch routines) and otherwise defers to
-    /// whatever intention the person picked before starting — mirrors
-    /// `WorkoutPlayerView.resolvedActivityType`.
+    /// Classifies the routine for HealthKit: a tagged kind wins, then the hold-vs-move ratio for
+    /// untagged routines, and otherwise whatever Intention the person picked before starting —
+    /// the same order `WorkoutPlayerView.resolvedActivityType` uses for live workouts.
     func resolvedActivityType(intention: WorkoutIntention) -> HKWorkoutActivityType {
         guard !exercises.isEmpty else { return .other }
-        if kind == .stretch { return .flexibility }
-        let holdFraction = Double(exercises.filter { $0.moveType == .hold }.count) / Double(exercises.count)
-        if holdFraction >= 0.8 { return .flexibility }
-        switch intention {
-        case .strengthPower: return .functionalStrengthTraining
-        case .generalFitness, .fatBurn, .cardioEndurance, .hiit: return .highIntensityIntervalTraining
-        }
+        if let fixed = kind?.healthKitActivityType { return fixed }
+        if isFlexibilitySession { return .flexibility }
+        return intention.healthKitActivityType
     }
 #endif
 }
@@ -323,7 +359,7 @@ enum PreloadedRoutines {
         accentColorName: "orange",
         systemImage: "figure.core.training",
         category: "Core",
-        kind: .workout
+        kind: .core
     )
 }
 
@@ -798,27 +834,30 @@ struct SavedRoutineDetailView: View {
                 }
 
                 // Intention — frames the HR-zone targets and recap for this session, same as
-                // the generator's own Intention picker (WorkoutGeneratorView.swift).
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Intention")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                    OverflowScrollRow(items: WorkoutIntention.allCases) { intent in
-                        Button { selectedIntention = intent } label: {
-                            VStack(spacing: 4) {
-                                Image(systemName: intent.icon)
-                                    .font(.subheadline)
-                                Text(intent.rawValue)
-                                    .font(.caption2)
-                                    .lineLimit(1)
+                // the generator's own Intention picker (WorkoutGeneratorView.swift). Stretching
+                // has no HR-zone target to frame, so stretch routines skip it.
+                if !routine.isFlexibilitySession {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Intention")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        OverflowScrollRow(items: WorkoutIntention.allCases) { intent in
+                            Button { selectedIntention = intent } label: {
+                                VStack(spacing: 4) {
+                                    Image(systemName: intent.icon)
+                                        .font(.subheadline)
+                                    Text(intent.rawValue)
+                                        .font(.caption2)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(selectedIntention == intent ? intent.bannerColor : Color.gray.opacity(0.1))
+                                .foregroundStyle(selectedIntention == intent ? .white : .primary)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(selectedIntention == intent ? intent.bannerColor : Color.gray.opacity(0.1))
-                            .foregroundStyle(selectedIntention == intent ? .white : .primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
 
@@ -1128,7 +1167,8 @@ struct SavedRoutinePlayerView: View {
                     return []
                     #endif
                 }(),
-                intention: intention,
+                // Stretching has no Intention, so the recap leaves out the zone-alignment score.
+                intention: routine.isFlexibilitySession ? nil : intention,
                 onDismiss: {
                     showingRecap = false
                     dismiss()
@@ -1494,9 +1534,7 @@ struct SavedRoutinePlayerView: View {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         let store = HKHealthStore()
         let configuration = HKWorkoutConfiguration()
-        configuration.activityType = routine.id == PreloadedRoutines.absWorkout.id
-            ? .coreTraining
-            : routine.resolvedActivityType(intention: intention)
+        configuration.activityType = routine.resolvedActivityType(intention: intention)
         configuration.locationType = .indoor
         store.startWatchApp(with: configuration) { success, error in
             if let error = error {

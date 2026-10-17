@@ -809,27 +809,8 @@ struct WorkoutPlayerView: View {
     /// falling back to the chosen intention when the areas don't point at one specific
     /// activity (e.g. a mixed Chest/Legs/Shoulders session).
     private var resolvedActivityType: HKWorkoutActivityType {
-        let coreAreas: Set<String> = ["Core", "Core: Strength"]
-        let flexibilityAreas: Set<String> = [
-            "Morning Stretches", "Evening Recovery", "Cool Down", "Warm-Up: Hips", "Warm-Up: Full Body"
-        ]
-        let cardioAreas: Set<String> = ["Cardio"]
-
-        if !selectedFocusAreas.isEmpty && selectedFocusAreas.isSubset(of: coreAreas) {
-            return .coreTraining
-        }
-        if !selectedFocusAreas.isEmpty && selectedFocusAreas.isSubset(of: flexibilityAreas) {
-            return .flexibility
-        }
-        if !selectedFocusAreas.isEmpty && selectedFocusAreas.isSubset(of: cardioAreas) {
-            return .mixedCardio
-        }
-        switch intention {
-        case .strengthPower:
-            return .functionalStrengthTraining
-        case .generalFitness, .fatBurn, .cardioEndurance, .hiit:
-            return .highIntensityIntervalTraining
-        }
+        SavedRoutineKind.forFocusAreas(selectedFocusAreas).healthKitActivityType
+            ?? intention.healthKitActivityType
     }
     #endif
 

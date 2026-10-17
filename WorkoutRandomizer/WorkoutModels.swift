@@ -102,6 +102,19 @@ enum WorkoutIntention: String, CaseIterable, Identifiable {
         }
     }
 
+#if canImport(HealthKit)
+    /// What a session is logged as in Apple Health when its content doesn't point at one
+    /// specific activity (Core-only, Cardio-only, stretch). Shared by live workouts and saved
+    /// routines so the two can't drift apart.
+    var healthKitActivityType: HKWorkoutActivityType {
+        switch self {
+        case .strengthPower: return .functionalStrengthTraining
+        case .cardioEndurance: return .mixedCardio
+        case .generalFitness, .fatBurn, .hiit: return .highIntensityIntervalTraining
+        }
+    }
+#endif
+
     func tip(for zone: String) -> String {
         switch (self, zone) {
         case (.fatBurn, "Zone 1"): return "Low intensity — light fat burn."

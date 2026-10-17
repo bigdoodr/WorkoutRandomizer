@@ -107,3 +107,72 @@ struct RoutineFolderTests {
         #expect(stretch.resolvedActivityType(intention: .hiit) == .flexibility)
     }
 }
+
+@MainActor
+struct ActivityTypeTests {
+
+    private func routine(
+        kind: SavedRoutineKind?,
+        moveType: SavedMoveType
+    ) -> SavedWorkoutRoutine {
+        SavedWorkoutRoutine(
+            name: "R", routineDescription: "", source: "You", sourceURL: "",
+            exercises: [
+                SavedRoutineExercise(name: "A", duration: 30, moveType: moveType),
+                SavedRoutineExercise(name: "B", duration: 30, moveType: moveType)
+            ],
+            accentColorName: "purple", systemImage: "star.fill", kind: kind
+        )
+    }
+
+    @Test func intentionMapping() {
+        #expect(WorkoutIntention.strengthPower.healthKitActivityType == .functionalStrengthTraining)
+        #expect(WorkoutIntention.cardioEndurance.healthKitActivityType == .mixedCardio)
+        #expect(WorkoutIntention.hiit.healthKitActivityType == .highIntensityIntervalTraining)
+        #expect(WorkoutIntention.fatBurn.healthKitActivityType == .highIntensityIntervalTraining)
+        #expect(WorkoutIntention.generalFitness.healthKitActivityType == .highIntensityIntervalTraining)
+    }
+
+    @Test func focusAreasDecideTheKind() {
+        #expect(SavedRoutineKind.forFocusAreas(["Core"]) == .core)
+        #expect(SavedRoutineKind.forFocusAreas(["Core", "Core: Strength"]) == .core)
+        #expect(SavedRoutineKind.forFocusAreas(["Cardio"]) == .cardio)
+        #expect(SavedRoutineKind.forFocusAreas(["Cool Down", "Warm-Up: Hips"]) == .stretch)
+        // The Upper quick filter: not purely core/cardio, so the Intention decides.
+        #expect(SavedRoutineKind.forFocusAreas(["Chest", "Shoulders", "Triceps"]) == .workout)
+        #expect(SavedRoutineKind.forFocusAreas(["Core", "Cardio"]) == .workout)
+        #expect(SavedRoutineKind.forFocusAreas([]) == .workout)
+    }
+
+    @Test func taggedKindOverridesIntention() {
+        let core = routine(kind: .core, moveType: .move)
+        #expect(core.resolvedActivityType(intention: .strengthPower) == .coreTraining)
+        let cardio = routine(kind: .cardio, moveType: .move)
+        #expect(cardio.resolvedActivityType(intention: .strengthPower) == .mixedCardio)
+    }
+
+    @Test func untaggedWorkoutFollowsIntention() {
+        let general = routine(kind: .workout, moveType: .move)
+        #expect(general.resolvedActivityType(intention: .strengthPower) == .functionalStrengthTraining)
+        #expect(general.resolvedActivityType(intention: .cardioEndurance) == .mixedCardio)
+        #expect(general.resolvedActivityType(intention: .generalFitness) == .highIntensityIntervalTraining)
+    }
+
+    @Test func flexibilityDetection() {
+        // Mostly holds with no tag reads as stretching.
+        #expect(routine(kind: nil, moveType: .hold).isFlexibilitySession)
+        #expect(routine(kind: nil, moveType: .hold).resolvedActivityType(intention: .hiit) == .flexibility)
+        // An explicit tag beats the ratio, in both directions.
+        #expect(!routine(kind: .workout, moveType: .hold).isFlexibilitySession)
+        #expect(routine(kind: .stretch, moveType: .move).isFlexibilitySession)
+        #expect(!routine(kind: nil, moveType: .move).isFlexibilitySession)
+    }
+
+    @Test func preloadedRoutinesAreRecordedAsDescribed() {
+        #expect(PreloadedRoutines.morningStretches.resolvedActivityType(intention: .hiit) == .flexibility)
+        #expect(PreloadedRoutines.bedtimeStretches.resolvedActivityType(intention: .hiit) == .flexibility)
+        #expect(PreloadedRoutines.absWorkout.resolvedActivityType(intention: .hiit) == .coreTraining)
+        #expect(PreloadedRoutines.morningStretches.isFlexibilitySession)
+        #expect(!PreloadedRoutines.absWorkout.isFlexibilitySession)
+    }
+}

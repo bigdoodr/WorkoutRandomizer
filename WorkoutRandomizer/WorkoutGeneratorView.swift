@@ -1816,7 +1816,10 @@ struct WorkoutGeneratorView: View {
             sourceURL: "",
             exercises: savedExercises,
             accentColorName: "purple",
-            systemImage: "dumbbell.fill"
+            systemImage: "dumbbell.fill",
+            // Remembered so replaying from Saved is logged the way the live run would be
+            // (a Core-only workout stays Core Training instead of being guessed again).
+            kind: SavedRoutineKind.forFocusAreas(selectedFocusAreas)
         )
         activeSheet = .saveRoutine(routine)
     }

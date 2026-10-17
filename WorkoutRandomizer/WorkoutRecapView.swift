@@ -30,7 +30,9 @@ struct WorkoutRecapView: View {
     let peakHeartRate: Double
     let averageHeartRate: Double
     var hrZoneDurations: [(name: String, seconds: TimeInterval)] = []
-    var intention: WorkoutIntention = .generalFitness
+    /// Nil for sessions with no HR-zone target (stretching): the alignment score and the notes
+    /// that interpret it are left out, while heart rate, calories and time in zone still show.
+    var intention: WorkoutIntention? = .generalFitness
     /// Which focus areas built this session. Used only to soften the HR-zone-match verdict
     /// below — some focus areas (Core) are naturally low-impact on heart rate, and a "Low"
     /// match there reflects the exercise, not the effort.
@@ -46,6 +48,7 @@ struct WorkoutRecapView: View {
         case .cardioEndurance: return [2, 3]
         case .strengthPower:   return [3, 4]
         case .hiit:            return [3, 4]
+        case nil:              return []
         }
     }
 
@@ -56,6 +59,7 @@ struct WorkoutRecapView: View {
         case .cardioEndurance: return "Zones 3–4"
         case .strengthPower:   return "Zones 4–5"
         case .hiit:            return "Zones 4–5"
+        case nil:              return ""
         }
     }
 
@@ -68,7 +72,7 @@ struct WorkoutRecapView: View {
     }
 
     private var showsEffortAcknowledgment: Bool {
-        !hrZoneDurations.isEmpty && isLowCardioImpactFocus && alignmentFraction < 0.6
+        intention != nil && !hrZoneDurations.isEmpty && isLowCardioImpactFocus && alignmentFraction < 0.6
     }
 
     // Zones 4-5 are meant for short bursts, not the bulk of a session (standard HR
@@ -149,7 +153,7 @@ struct WorkoutRecapView: View {
                         if averageHeartRate > 0 {
                             RecapStatCard(title: "Avg HR",     value: "\(Int(averageHeartRate)) BPM", icon: "heart",      color: .pink)
                         }
-                        if !hrZoneDurations.isEmpty {
+                        if !hrZoneDurations.isEmpty, let intention {
                             RecapStatCard(title: intention.rawValue, value: "\(alignmentLabel)", icon: intention.icon, color: alignmentColor)
                         }
                     }
