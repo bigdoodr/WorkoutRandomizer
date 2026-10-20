@@ -83,7 +83,7 @@ struct TutorialView: View {
         ),
         TutorialPage(
             title: "Saved & Shared Routines",
-            body: "The Saved tab has curated workouts — Athlean-X morning stretches, a bedtime routine, and a 10-minute ab circuit — each with per-exercise timers built in. Anything you generate can be saved there under My Routines, or exported to a file and imported back later.",
+            body: "The Saved tab has curated workouts — Athlean-X morning stretches, a bedtime routine, and a 10-minute ab circuit — each with per-exercise timers built in. Anything you generate, stretch, or build can be saved there into a folder of your choosing. Swipe a routine to export it to a file, and use the import button to bring one back later.",
             icon: "folder.fill", color: .brown, since: "1.4"
         ),
         TutorialPage(

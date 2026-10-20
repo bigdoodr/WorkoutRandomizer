@@ -35,11 +35,7 @@ struct WorkoutGeneratorView: View {
     @State private var showingWorkout = false
     @State private var isGenerating = false
     @State private var scrollToGeneratedToken = UUID()
-    @State private var showingImportExport = false
-    @State private var showingExporter = false
-    @State private var showingImporter = false
-    @State private var exportDocument: WorkoutDocument?
-    
+
     // Feedback settings — @AppStorage, not @State, so they survive a launch. Same keys as
     // SettingsView, which is how a change made there reaches the player.
     @AppStorage("enableSound_iOS_tv_vision") private var enableSound_iOS_tv_vision = true
@@ -1075,55 +1071,24 @@ struct WorkoutGeneratorView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 10))
                                     }
 
-                                    HStack(spacing: 8) {
-                                        Button {
-                                            exportWorkout()
-                                        } label: {
-                                            HStack {
-                                                Image(systemName: "square.and.arrow.up")
-                                                Text("Export")
-                                            }
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 10)
-                                            .background(.blue)
-                                            .foregroundStyle(.white)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    // Export and Import live in the Saved tab now: save a routine
+                                    // here, then export it from there.
+                                    Button {
+                                        saveGeneratedRoutine()
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "bookmark.fill")
+                                            Text("Save")
                                         }
-
-                                        Button {
-                                            saveGeneratedRoutine()
-                                        } label: {
-                                            HStack {
-                                                Image(systemName: "bookmark.fill")
-                                                Text("Save")
-                                            }
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 10)
-                                            .background(.purple)
-                                            .foregroundStyle(.white)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 10)
+                                        .background(.purple)
+                                        .foregroundStyle(.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
                                     }
                                 }
                             }
                             .id(scrollToGeneratedToken)
-                        }
-                        
-                        // Import Workout Button
-                        if generatedRoutine.isEmpty {
-                            Button {
-                                showingImporter = true
-                            } label: {
-                                HStack {
-                                    Image(systemName: "square.and.arrow.down")
-                                    Text("Import Workout")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(.purple)
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
                         }
                     }
                     .padding()
@@ -1175,47 +1140,6 @@ struct WorkoutGeneratorView: View {
             Button("OK") { }
         } message: {
             Text("Saved to \"\(savedFolderName)\" in the Saved tab.")
-        }
-        .fileExporter(
-            isPresented: $showingExporter,
-            document: exportDocument,
-            contentType: .json,
-            defaultFilename: "workout.json",
-            onCompletion: { result in
-                switch result {
-                case .success(let url):
-                    print("Workout exported to: \(url)")
-                case .failure(let error):
-                    print("Export failed: \(error.localizedDescription)")
-                }
-                exportDocument = nil
-            }
-        )
-        .fileImporter(
-            isPresented: $showingImporter,
-            allowedContentTypes: [.json],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer {
-                    if accessing {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
-                do {
-                    let data = try Data(contentsOf: url)
-                    let exercises = try JSONDecoder().decode([ExportableExercise].self, from: data)
-                    let document = WorkoutDocument(exercises: exercises)
-                    importWorkout(from: document)
-                } catch {
-                    print("Import failed: \(error.localizedDescription)")
-                }
-            case .failure(let error):
-                print("File selection failed: \(error.localizedDescription)")
-            }
         }
         .onAppear {
             // The guide goes first and the video-mode prompt follows it, which is both the only
@@ -1739,36 +1663,6 @@ struct WorkoutGeneratorView: View {
         return result
     }
     
-    private func exportWorkout() {
-        // Durations must come from the resolver, not the flat Standard-style values —
-        // otherwise a Pyramid or Blocks routine exports with whatever exerciseDuration
-        // happens to be set, and any Custom Timers edits are dropped entirely.
-        let exportableExercises = generatedRoutine.enumerated().map { index, exercise in
-            let isRest = exercise.name == "Rest"
-            // A non-rest slot carries the rest that actually follows it; when no rest follows
-            // (rest frequency > 1) fall back to the configured value, as before.
-            let followingRest: Int = {
-                guard !isRest else { return 0 }
-                let next = index + 1
-                guard next < generatedRoutine.count,
-                      generatedRoutine[next].name == "Rest" else { return effectiveRestDuration }
-                return timing.duration(at: next, in: generatedRoutine)
-            }()
-            return ExportableExercise(
-                name: exercise.name,
-                isTimeBased: true,
-                exerciseDuration: timing.duration(at: index, in: generatedRoutine),
-                restDuration: followingRest,
-                sets: 1
-            )
-        }
-        let document = WorkoutDocument(exercises: exportableExercises)
-        exportDocument = document
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            showingExporter = true
-        }
-    }
-    
     private func saveGeneratedRoutine() {
         var savedExercises: [SavedRoutineExercise] = []
         for (i, ex) in generatedRoutine.enumerated() {
@@ -1822,44 +1716,6 @@ struct WorkoutGeneratorView: View {
             kind: SavedRoutineKind.forFocusAreas(selectedFocusAreas)
         )
         activeSheet = .saveRoutine(routine)
-    }
-
-    private func importWorkout(from document: WorkoutDocument) {
-        var importedRoutine: [Exercise] = []
-        var didSetDurations = false
-        
-        for exportableExercise in document.exercises {
-            // Try to find matching exercise in our database
-            var foundExercise: Exercise?
-            
-            for (_, difficultyDict) in exercises {
-                for (_, exerciseList) in difficultyDict {
-                    if let match = exerciseList.first(where: { $0.name == exportableExercise.name }) {
-                        foundExercise = match
-                        break
-                    }
-                }
-                if foundExercise != nil { break }
-            }
-            
-            // If found, use it; otherwise create a basic exercise with no video
-            let exercise = foundExercise ?? Exercise(name: exportableExercise.name, videoPath: nil, equipment: ["None"])
-            importedRoutine.append(exercise)
-            
-            // Update durations from the first non-rest exercise only
-            if !didSetDurations && exportableExercise.isTimeBased && exportableExercise.name != "Rest" {
-                exerciseDuration = exportableExercise.exerciseDuration
-                if exportableExercise.restDuration > 0 {
-                    // The file specifies its own rest; honour it rather than re-deriving.
-                    restDuration = exportableExercise.restDuration
-                    restLinkedToWork = false
-                }
-                didSetDurations = true
-            }
-        }
-        
-        generatedRoutine = importedRoutine
-        scrollToGeneratedToken = UUID()
     }
 
     /// Swaps two adjacent slots. Any Custom Timers overrides on either index move with their

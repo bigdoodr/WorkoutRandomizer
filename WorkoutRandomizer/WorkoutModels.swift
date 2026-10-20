@@ -227,6 +227,10 @@ struct WorkoutItem {
 }
 
 // MARK: - Import/Export Models
+
+/// The shape workouts were exported in before routines had their own file format: a flat list
+/// of exercises with one duration and one rest each. Only read now, so files from older
+/// versions still import.
 struct ExportableExercise: Codable, Identifiable {
     let id: String
     let name: String
@@ -245,27 +249,101 @@ struct ExportableExercise: Codable, Identifiable {
     }
 }
 
-struct WorkoutDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-    
-    var exercises: [ExportableExercise]
-    
-    init(exercises: [ExportableExercise]) {
-        self.exercises = exercises
+/// A whole saved routine on disk — every exercise's own duration, rest, sides and Hold/Move,
+/// plus its folder, color and icon — so exporting and re-importing is lossless. `format` and
+/// `version` let the importer tell this apart from other JSON and evolve the file later.
+struct RoutineExportFile: Codable {
+    static let formatName = "WorkoutRandomizerRoutine"
+
+    var format: String = RoutineExportFile.formatName
+    var version: Int = 1
+    var routine: SavedWorkoutRoutine
+}
+
+enum RoutineImport {
+    /// Reads either file shape and returns a routine ready to save, or nil when the data is
+    /// neither (or has nothing to play). Imported routines always get a fresh id, so importing
+    /// a file you exported yourself adds a copy instead of colliding with the original.
+    static func parse(_ data: Data, fallbackName: String) -> SavedWorkoutRoutine? {
+        let decoder = JSONDecoder()
+        if let file = try? decoder.decode(RoutineExportFile.self, from: data),
+           file.format == RoutineExportFile.formatName {
+            return sanitized(file.routine.duplicated())
+        }
+        if let legacy = try? decoder.decode([ExportableExercise].self, from: data) {
+            return fromLegacy(legacy, name: fallbackName)
+        }
+        return nil
     }
-    
+
+    /// Old files list every slot including the rests between them, and also carry each
+    /// exercise's following rest — so the "Rest" entries are redundant and skipped. The last
+    /// exercise's rest was only ever a configured fallback, not a real rest, so it's dropped.
+    static func fromLegacy(_ entries: [ExportableExercise], name: String) -> SavedWorkoutRoutine? {
+        let work = entries.filter { $0.name != "Rest" }
+        guard !work.isEmpty else { return nil }
+        let exercises = work.enumerated().map { index, entry in
+            SavedRoutineExercise(
+                name: entry.name,
+                duration: entry.exerciseDuration,
+                restDuration: index < work.count - 1 ? entry.restDuration : 0,
+                singleSided: false,
+                restAfterEachSide: false,
+                moveType: .move
+            )
+        }
+        let routine = SavedWorkoutRoutine(
+            name: name,
+            routineDescription: "",
+            source: "Imported",
+            sourceURL: "",
+            exercises: exercises,
+            accentColorName: "purple",
+            systemImage: "dumbbell.fill"
+        )
+        return sanitized(routine)
+    }
+
+    /// Files come from outside the app, so keep timings in a range the player can run.
+    private static func sanitized(_ routine: SavedWorkoutRoutine) -> SavedWorkoutRoutine? {
+        guard !routine.exercises.isEmpty else { return nil }
+        var cleaned = routine
+        cleaned.exercises = routine.exercises.map { exercise in
+            var e = exercise
+            e.duration = min(max(e.duration, 1), 3600)
+            e.restDuration = min(max(e.restDuration, 0), 3600)
+            return e
+        }
+        return cleaned
+    }
+}
+
+/// Export-only wrapper handed to `fileExporter`.
+struct RoutineDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    var routine: SavedWorkoutRoutine
+
+    init(routine: SavedWorkoutRoutine) {
+        self.routine = routine
+    }
+
     init(configuration: ReadConfiguration) throws {
-        guard let data = configuration.file.regularFileContents else {
+        guard let data = configuration.file.regularFileContents,
+              let parsed = RoutineImport.parse(data, fallbackName: "Imported Workout") else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        exercises = try JSONDecoder().decode([ExportableExercise].self, from: data)
+        routine = parsed
     }
-    
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+
+    func encodedData() throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(exercises)
-        return FileWrapper(regularFileWithContents: data)
+        return try encoder.encode(RoutineExportFile(routine: routine))
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: try encodedData())
     }
 }
 

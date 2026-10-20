@@ -109,6 +109,106 @@ struct RoutineFolderTests {
 }
 
 @MainActor
+struct RoutineImportTests {
+
+    private func sampleRoutine() -> SavedWorkoutRoutine {
+        SavedWorkoutRoutine(
+            name: "Push Day",
+            routineDescription: "Chest and shoulders",
+            source: "You",
+            sourceURL: "",
+            exercises: [
+                SavedRoutineExercise(name: "Push-Up", duration: 40, restDuration: 15, moveType: .move),
+                SavedRoutineExercise(name: "Hip Flexor Stretch", duration: 30, restDuration: 5,
+                                     singleSided: true, restAfterEachSide: true, moveType: .hold)
+            ],
+            accentColorName: "teal",
+            systemImage: "bolt.fill",
+            category: "Man of Steel",
+            kind: .workout
+        )
+    }
+
+    private func encoded(_ routine: SavedWorkoutRoutine) throws -> Data {
+        try JSONEncoder().encode(RoutineExportFile(routine: routine))
+    }
+
+    @Test func roundTripKeepsEverythingButTheIDs() throws {
+        let original = sampleRoutine()
+        let imported = try #require(RoutineImport.parse(try encoded(original), fallbackName: "ignored"))
+
+        #expect(imported.name == "Push Day")
+        #expect(imported.category == "Man of Steel")
+        #expect(imported.kind == .workout)
+        #expect(imported.accentColorName == "teal")
+        #expect(imported.systemImage == "bolt.fill")
+        #expect(imported.exercises.map(\.name) == ["Push-Up", "Hip Flexor Stretch"])
+        #expect(imported.exercises.map(\.duration) == [40, 30])
+        #expect(imported.exercises.map(\.restDuration) == [15, 5])
+        #expect(imported.exercises[1].singleSided)
+        #expect(imported.exercises[1].restAfterEachSide)
+        #expect(imported.exercises[1].moveType == .hold)
+
+        // A re-imported file must never collide with the routine it came from.
+        #expect(imported.id != original.id)
+        #expect(Set(imported.exercises.map(\.id)).isDisjoint(with: original.exercises.map(\.id)))
+    }
+
+    @Test func oldExportedWorkoutsStillImport() throws {
+        let legacy = [
+            ExportableExercise(name: "Squat", isTimeBased: true, exerciseDuration: 45, restDuration: 20, sets: 1),
+            ExportableExercise(name: "Rest", isTimeBased: true, exerciseDuration: 20, restDuration: 0, sets: 1),
+            ExportableExercise(name: "Lunge (Left)", isTimeBased: true, exerciseDuration: 30, restDuration: 15, sets: 1),
+            ExportableExercise(name: "Rest", isTimeBased: true, exerciseDuration: 15, restDuration: 0, sets: 1),
+            ExportableExercise(name: "Lunge (Right)", isTimeBased: true, exerciseDuration: 30, restDuration: 10, sets: 1)
+        ]
+        let data = try JSONEncoder().encode(legacy)
+        let imported = try #require(RoutineImport.parse(data, fallbackName: "Old Workout"))
+
+        #expect(imported.name == "Old Workout")
+        #expect(imported.category == nil)
+        // The standalone Rest entries fold into the exercise before them.
+        #expect(imported.exercises.map(\.name) == ["Squat", "Lunge (Left)", "Lunge (Right)"])
+        #expect(imported.exercises.map(\.duration) == [45, 30, 30])
+        #expect(imported.exercises.map(\.restDuration) == [20, 15, 0])
+    }
+
+    @Test func unreadableOrEmptyFilesAreRejected() throws {
+        #expect(RoutineImport.parse(Data("not json".utf8), fallbackName: "x") == nil)
+        #expect(RoutineImport.parse(Data("{\"hello\": 1}".utf8), fallbackName: "x") == nil)
+        #expect(RoutineImport.parse(Data("[]".utf8), fallbackName: "x") == nil)
+
+        var empty = sampleRoutine()
+        empty.exercises = []
+        #expect(RoutineImport.parse(try encoded(empty), fallbackName: "x") == nil)
+
+        // Valid JSON of the right shape but from some other app's format.
+        let wrongFormat = """
+        {"format":"SomethingElse","version":1,"routine":{}}
+        """
+        #expect(RoutineImport.parse(Data(wrongFormat.utf8), fallbackName: "x") == nil)
+    }
+
+    @Test func outOfRangeTimingsAreClamped() throws {
+        var wild = sampleRoutine()
+        wild.exercises = [
+            SavedRoutineExercise(name: "A", duration: 0, restDuration: -5),
+            SavedRoutineExercise(name: "B", duration: 999_999, restDuration: 999_999)
+        ]
+        let imported = try #require(RoutineImport.parse(try encoded(wild), fallbackName: "x"))
+        #expect(imported.exercises.map(\.duration) == [1, 3600])
+        #expect(imported.exercises.map(\.restDuration) == [0, 3600])
+    }
+
+    @Test func exportedDocumentDecodesBackToTheSameRoutine() throws {
+        let data = try RoutineDocument(routine: sampleRoutine()).encodedData()
+        let imported = try #require(RoutineImport.parse(data, fallbackName: "x"))
+        #expect(imported.name == "Push Day")
+        #expect(imported.exercises.count == 2)
+    }
+}
+
+@MainActor
 struct ActivityTypeTests {
 
     private func routine(

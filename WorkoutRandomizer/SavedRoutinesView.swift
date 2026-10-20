@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+internal import UniformTypeIdentifiers
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
@@ -92,7 +93,7 @@ struct SavedWorkoutRoutine: Identifiable, Codable {
     let routineDescription: String
     let source: String
     let sourceURL: String
-    let exercises: [SavedRoutineExercise]
+    var exercises: [SavedRoutineExercise]
     let accentColorName: String
     let systemImage: String
     /// The folder this routine is filed under. Optional (not defaulted) so routines saved by
@@ -366,6 +367,19 @@ enum PreloadedRoutines {
 // MARK: - Saved Routines List
 
 extension SavedWorkoutRoutine {
+    /// A copy with a fresh id (and fresh exercise ids), so it saves alongside the original
+    /// rather than replacing it.
+    func duplicated() -> SavedWorkoutRoutine {
+        var copy = filed(name: name, category: category)
+        copy.id = UUID()
+        copy.exercises = exercises.map { exercise in
+            var e = exercise
+            e.id = UUID()
+            return e
+        }
+        return copy
+    }
+
     /// The same routine under a new name and folder (name and category are fixed at creation).
     func filed(name: String, category: String?) -> SavedWorkoutRoutine {
         SavedWorkoutRoutine(
@@ -389,6 +403,10 @@ struct SavedRoutinesView: View {
     @State private var folderToRename: RoutineFolder?
     @State private var renameText = ""
     @State private var folderToDelete: RoutineFolder?
+    @State private var showingImporter = false
+    @State private var showImportAlert = false
+    @State private var importAlertTitle = ""
+    @State private var importAlertMessage = ""
 
     var body: some View {
         let grouped = RoutineFolders.folders(preloaded: PreloadedRoutines.all, user: store.routines)
@@ -441,7 +459,12 @@ struct SavedRoutinesView: View {
                 EditButton()
             }
 #endif
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    showingImporter = true
+                } label: {
+                    Label("Import Routine", systemImage: "square.and.arrow.down")
+                }
                 Button {
                     showingBuilder = true
                 } label: {
@@ -451,6 +474,18 @@ struct SavedRoutinesView: View {
         }
         .sheet(isPresented: $showingBuilder) {
             BuildYourOwnRoutineView()
+        }
+        .fileImporter(
+            isPresented: $showingImporter,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            handleImport(result)
+        }
+        .alert(importAlertTitle, isPresented: $showImportAlert) {
+            Button("OK") { }
+        } message: {
+            Text(importAlertMessage)
         }
         .alert("Rename Folder", isPresented: Binding(
             get: { folderToRename != nil },
@@ -477,6 +512,47 @@ struct SavedRoutinesView: View {
             Button("Delete \"\(folder.name)\" and \(folder.routines.count) routine\(folder.routines.count == 1 ? "" : "s")", role: .destructive) {
                 store.deleteCategory(folder.name)
             }
+        }
+    }
+
+    /// Reads a routine file (the current format, or an older exported workout) and files it in
+    /// the folder named in the file, or Uncategorized. A routine can be moved afterwards from
+    /// its folder's context menu.
+    private func handleImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+            let fallbackName = url.deletingPathExtension().lastPathComponent
+            guard let data = try? Data(contentsOf: url),
+                  let routine = RoutineImport.parse(data, fallbackName: fallbackName.isEmpty ? "Imported Workout" : fallbackName) else {
+                presentImportAlert(
+                    title: "Couldn't Import",
+                    message: "That file isn't a routine this app can read, or it has no exercises."
+                )
+                return
+            }
+            store.save(routine)
+            let folder = RoutineFolders.normalizedName(routine.category) ?? RoutineFolders.uncategorizedName
+            presentImportAlert(
+                title: "Routine Imported",
+                message: "\"\(routine.name)\" was added to \"\(folder)\"."
+            )
+        case .failure(let error):
+            presentImportAlert(title: "Couldn't Import", message: error.localizedDescription)
+        }
+    }
+
+    /// The file picker is still leaving when its completion runs, and an alert raised in that
+    /// window can be dropped — so wait a beat.
+    private func presentImportAlert(title: String, message: String) {
+        importAlertTitle = title
+        importAlertMessage = message
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            showImportAlert = true
         }
     }
 }
@@ -521,7 +597,17 @@ struct SavedFolderView: View {
     let folderID: String
     @State private var store = SavedRoutineStore.shared
     @State private var routineToMove: SavedWorkoutRoutine?
+    @State private var exportDocument: RoutineDocument?
+    @State private var exportFilename = "Routine"
+    @State private var showingExporter = false
     @Environment(\.dismiss) private var dismiss
+
+    private func export(_ routine: SavedWorkoutRoutine) {
+        // Slashes would read as folders in the suggested filename.
+        exportFilename = routine.name.replacingOccurrences(of: "/", with: "-")
+        exportDocument = RoutineDocument(routine: routine)
+        showingExporter = true
+    }
 
     private var folder: RoutineFolder? {
         let grouped = RoutineFolders.folders(preloaded: PreloadedRoutines.all, user: store.routines)
@@ -540,6 +626,14 @@ struct SavedFolderView: View {
                     NavigationLink(destination: SavedRoutineDetailView(routine: routine)) {
                         RoutineRow(routine: routine)
                     }
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            export(routine)
+                        } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                        }
+                        .tint(.green)
+                    }
                     .swipeActions(edge: .trailing) {
                         if !isBuiltIn(routine) {
                             Button(role: .destructive) {
@@ -550,6 +644,11 @@ struct SavedFolderView: View {
                         }
                     }
                     .contextMenu {
+                        Button {
+                            export(routine)
+                        } label: {
+                            Label("Export…", systemImage: "square.and.arrow.up")
+                        }
                         if !isBuiltIn(routine) {
                             Button {
                                 routineToMove = routine
@@ -575,6 +674,17 @@ struct SavedFolderView: View {
 #endif
         .onChange(of: current == nil) { _, isGone in
             if isGone { dismiss() }
+        }
+        .fileExporter(
+            isPresented: $showingExporter,
+            document: exportDocument,
+            contentType: .json,
+            defaultFilename: exportFilename
+        ) { result in
+            if case .failure(let error) = result {
+                print("Routine export failed: \(error.localizedDescription)")
+            }
+            exportDocument = nil
         }
         .sheet(item: $routineToMove) { routine in
             SaveRoutinePromptView(
