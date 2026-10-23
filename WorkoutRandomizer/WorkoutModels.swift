@@ -71,7 +71,7 @@ struct RepeatingBlocksConfig: Equatable {
     var cycleRestSeconds: Int? = nil
 }
 
-enum WorkoutIntention: String, CaseIterable, Identifiable {
+nonisolated enum WorkoutIntention: String, CaseIterable, Identifiable {
     case generalFitness = "General Fitness"
     case fatBurn = "Fat Burn"
     case cardioEndurance = "Cardio Endurance"
@@ -231,7 +231,7 @@ struct WorkoutItem {
 /// The shape workouts were exported in before routines had their own file format: a flat list
 /// of exercises with one duration and one rest each. Only read now, so files from older
 /// versions still import.
-struct ExportableExercise: Codable, Identifiable {
+nonisolated struct ExportableExercise: Codable, Identifiable {
     let id: String
     let name: String
     let isTimeBased: Bool
@@ -252,7 +252,7 @@ struct ExportableExercise: Codable, Identifiable {
 /// A whole saved routine on disk — every exercise's own duration, rest, sides and Hold/Move,
 /// plus its folder, color and icon — so exporting and re-importing is lossless. `format` and
 /// `version` let the importer tell this apart from other JSON and evolve the file later.
-struct RoutineExportFile: Codable {
+nonisolated struct RoutineExportFile: Codable {
     static let formatName = "WorkoutRandomizerRoutine"
 
     var format: String = RoutineExportFile.formatName

@@ -10,12 +10,12 @@ import HealthKit
 
 // MARK: - Models
 
-enum SavedMoveType: String, Codable {
+nonisolated enum SavedMoveType: String, Codable {
     case hold = "Hold"
     case move = "Move"
 }
 
-struct SavedRoutineExercise: Identifiable, Codable {
+nonisolated struct SavedRoutineExercise: Identifiable, Codable {
     var id = UUID()
     let name: String
     var duration: Int           // work/hold seconds per side
@@ -52,7 +52,7 @@ struct SavedRoutineExercise: Identifiable, Codable {
 /// routines mix holds and moving drills (Cat-Cow), so the hold-vs-move ratio alone would misfile
 /// them as a workout when recording to Apple Health. `core` and `cardio` remember that a saved
 /// workout was built from only those focus areas, which is what the live generator logs it by.
-enum SavedRoutineKind: String, Codable {
+nonisolated enum SavedRoutineKind: String, Codable {
     case workout
     case stretch
     case core
@@ -87,7 +87,7 @@ enum SavedRoutineKind: String, Codable {
 #endif
 }
 
-struct SavedWorkoutRoutine: Identifiable, Codable {
+nonisolated struct SavedWorkoutRoutine: Identifiable, Codable {
     var id = UUID()
     let name: String
     let routineDescription: String

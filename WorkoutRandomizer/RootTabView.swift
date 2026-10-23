@@ -28,7 +28,7 @@ struct RootTabView: View {
     @State private var hrZones = HRZoneSettings.shared
 
     enum AppTab: Hashable {
-        case generator, exercises, saved, settings
+        case generator, timer, exercises, saved, settings
     }
 
     var body: some View {
@@ -38,9 +38,15 @@ struct RootTabView: View {
             // to. (SettingsView is the exception: it already wraps itself in one.)
             Tab("Generate", systemImage: "figure.mixed.cardio", value: AppTab.generator) {
                 NavigationStack {
-                    GenerateHubView()
+                    GenerateHubView(onOpenTimer: { selection = .timer })
                 }
                 .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
+            }
+
+            // Timer style, durations, rest and warm-up/cool-down for generated workouts.
+            Tab("Timer", systemImage: "timer", value: AppTab.timer) {
+                TimerSettingsView()
+                    .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
 
             Tab("Exercises", systemImage: "list.bullet.rectangle.portrait", value: AppTab.exercises) {
@@ -96,6 +102,9 @@ private struct GenerateHubView: View {
         var id: String { rawValue }
     }
 
+    /// Opens the Timer tab (the workout generator's summary row calls it).
+    var onOpenTimer: () -> Void = {}
+
     @State private var segment: Segment = .workout
 
     var body: some View {
@@ -108,7 +117,7 @@ private struct GenerateHubView: View {
             .padding(.vertical, 8)
 
             ZStack {
-                WorkoutGeneratorView()
+                WorkoutGeneratorView(onOpenTimer: onOpenTimer)
                     .opacity(segment == .workout ? 1 : 0)
                     .allowsHitTesting(segment == .workout)
                     .accessibilityHidden(segment != .workout)

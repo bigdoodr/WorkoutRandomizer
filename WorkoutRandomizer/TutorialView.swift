@@ -73,7 +73,7 @@ struct TutorialView: View {
         ),
         TutorialPage(
             title: "Getting Around & Settings",
-            body: "Four tabs along the bottom. Generate builds a workout, or a stretch-only session from its Stretch picker. Exercises browses the whole catalog with demo videos and holds the moves you add yourself under Mine. Saved holds curated routines and your own. Settings is where video, sound, and haptics all stick between launches — and you can reopen this guide any time.",
+            body: "Five tabs along the bottom. Generate builds a workout, or a stretch-only session from its Stretch picker. Timer sets the timer style, durations, rest, and warm-up/cool-down that Generate applies. Exercises browses the whole catalog with demo videos and holds the moves you add yourself under Mine. Saved holds curated routines and your own. Settings is where video, sound, and haptics all stick between launches — and you can reopen this guide any time.",
             icon: "square.grid.2x2.fill", color: .cyan, since: "2.0"
         ),
         TutorialPage(
