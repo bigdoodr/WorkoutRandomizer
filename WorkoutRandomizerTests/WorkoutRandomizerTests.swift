@@ -209,6 +209,69 @@ struct RoutineImportTests {
 }
 
 @MainActor
+struct MyListGenerationTests {
+
+    private func ex(_ name: String) -> Exercise {
+        Exercise(name: name, videoPath: nil, equipment: ["None"])
+    }
+
+    private func names(_ list: [Exercise]) -> [String] { list.map(\.name) }
+
+    @Test func fitsExactlyTheRequestedSlotsInOrder() {
+        let units = [[ex("A")], [ex("B")], [ex("C")]]
+        #expect(names(GeneratorSettings.fitUnits(units, toSlots: 2)) == ["A", "B"])
+        #expect(names(GeneratorSettings.fitUnits(units, toSlots: 3)) == ["A", "B", "C"])
+    }
+
+    @Test func cyclesBackToTheStartWhenTheListIsShorter() {
+        let units = [[ex("A")], [ex("B")]]
+        #expect(names(GeneratorSettings.fitUnits(units, toSlots: 5)) == ["A", "B", "A", "B", "A"])
+    }
+
+    @Test func neverSplitsALeftRightPair() {
+        let pair = [ex("Lunge (Left)"), ex("Lunge (Right)")]
+        let units = [[ex("A")], pair, [ex("B")]]
+        // 2 slots: A, then the pair can't fit the last slot, so B takes it.
+        #expect(names(GeneratorSettings.fitUnits(units, toSlots: 2)) == ["A", "B"])
+        // 3 slots: A + the whole pair.
+        #expect(names(GeneratorSettings.fitUnits(units, toSlots: 3)) == ["A", "Lunge (Left)", "Lunge (Right)"])
+    }
+
+    @Test func emptyListOrZeroSlotsYieldNothing() {
+        #expect(GeneratorSettings.fitUnits([], toSlots: 4).isEmpty)
+        #expect(GeneratorSettings.fitUnits([[ex("A")]], toSlots: 0).isEmpty)
+    }
+
+    @Test func aListOfOnlyPairsStopsShortRatherThanSplittingOne() {
+        let units = [[ex("X (Left)"), ex("X (Right)")]]
+        let result = GeneratorSettings.fitUnits(units, toSlots: 3)
+        #expect(names(result) == ["X (Left)", "X (Right)"])
+    }
+
+    @Test func performAllNeedsAStyleWhoseCountFollowsTheList() {
+        let settings = GeneratorSettings.shared
+        let saved = (settings.source, settings.listMode, settings.timerStyle)
+        defer { (settings.source, settings.listMode, settings.timerStyle) = saved }
+
+        settings.source = .myList
+        settings.listMode = .performAll
+        for style in [TimerStyle.standard, .blocks, .addOn, .addOnTakeAway] {
+            settings.timerStyle = style
+            #expect(settings.usesPerformAll)
+        }
+        settings.timerStyle = .pyramid
+        #expect(!settings.usesPerformAll)
+
+        settings.timerStyle = .standard
+        settings.listMode = .drawFrom
+        #expect(!settings.usesPerformAll)
+        settings.listMode = .performAll
+        settings.source = .random
+        #expect(!settings.usesPerformAll)
+    }
+}
+
+@MainActor
 struct ActivityTypeTests {
 
     private func routine(

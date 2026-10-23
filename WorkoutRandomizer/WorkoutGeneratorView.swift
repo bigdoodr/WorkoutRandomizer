@@ -23,9 +23,19 @@ import AppKit
 struct WorkoutGeneratorView: View {
     /// Opens the Timer tab. Supplied by the tab container; the summary row calls it.
     var onOpenTimer: (() -> Void)? = nil
+    /// Opens the Build Your Own sheet, where the My List exercises are edited.
+    var onEditList: (() -> Void)? = nil
 
     /// Timer style, durations, rest and warm-up/cool-down — edited in the Timer tab.
     @State private var settings = GeneratorSettings.shared
+    /// The exercises queued for Build Your Own — the "My List" source.
+    @State private var queue = RoutineBuilderQueue.shared
+
+    /// The focus areas that actually apply: the chips only matter for the Random source, so a
+    /// stale selection can't leak into a My List workout's warm-up, name, or Health type.
+    private var activeFocusAreas: Set<String> {
+        settings.source == .myList ? [] : selectedFocusAreas
+    }
 
     @State private var selectedFocusAreas: Set<String> = []
     @State private var selectedDifficulties: Set<String> = ["Beginner", "Medium", "Hard", "Expert/Advanced"]
@@ -214,7 +224,10 @@ struct WorkoutGeneratorView: View {
     }
 
     private var generateButtonIsReady: Bool {
-        !selectedFocusAreas.isEmpty && !selectedDifficulties.isEmpty
+        switch settings.source {
+        case .random: return !selectedFocusAreas.isEmpty && !selectedDifficulties.isEmpty
+        case .myList: return !queue.items.isEmpty
+        }
     }
 
     private func difficultyIcon(_ level: String) -> String {
@@ -255,6 +268,69 @@ struct WorkoutGeneratorView: View {
     /// Custom Timers overrides, so the preview, Custom Timers and the player always agree.
     var timing: WorkoutTiming { settings.timing(overrides: exerciseDurationOverrides) }
 
+    /// The My List card: what's queued, how it will be used, and a shortcut to edit it.
+    @ViewBuilder
+    private var myListSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("My List")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button("Edit List") { onEditList?() }
+                    .font(.subheadline)
+            }
+
+            if queue.items.isEmpty {
+                Text("Nothing here yet. Swipe exercises in the Exercises tab to add them, or tap Edit List.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                let names = queue.items.map(\.name)
+                Text("\(names.count) exercise\(names.count == 1 ? "" : "s"): \(names.prefix(3).joined(separator: ", "))\(names.count > 3 ? "…" : "")")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Picker("How to use the list", selection: $settings.listMode) {
+                ForEach(ListMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!settings.performAllAvailable)
+
+            if !settings.performAllAvailable {
+                Text("Pyramid sets how many exercises it needs from the Total Duration, so your list is used as a pool to draw from.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if settings.listMode == .performAll {
+                Text(performAllCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Shuffle order", isOn: $settings.shuffleListOrder)
+                    .font(.subheadline)
+            } else {
+                Text("Fills the chosen length by drawing from your list, repeating exercises if needed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .background(.gray.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .id("myListSection")
+    }
+
+    private var performAllCaption: String {
+        switch timerStyle {
+        case .blocks:
+            return "Uses your list in order for each cycle: \(blocksCount * exercisesPerBlock) exercise slots per cycle, cycling back to the start if the list is shorter."
+        case .addOn, .addOnTakeAway:
+            return "Builds the ladder from your list in order, up to 10 exercises."
+        default:
+            return "Does every exercise in your list once, in order. The total length follows the list."
+        }
+    }
+
     /// One line describing the timer that will be applied, shown on the summary row.
     private var timerSummary: String {
         var parts = [timerStyle.shortLabel]
@@ -290,80 +366,93 @@ struct WorkoutGeneratorView: View {
                     VStack(alignment: .leading, spacing: 20) {
 
 
-                        // Focus Areas
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Focus Areas")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-
-                            // Quick filters — multi-select: tap to toggle each group
-                            focusAreaFilterRow
-
+                        // Source — Random draws from the focus areas below; My List uses the exercises
+                        // queued in Build Your Own, with the timer style applied to them.
+                        Picker("Source", selection: $settings.source) {
+                            ForEach(GenerationSource.allCases) { Text($0.rawValue).tag($0) }
                         }
-                        .id("focusAreasSection")
+                        .pickerStyle(.segmented)
 
-                        // Equipment Available
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Equipment Available")
-                                .font(.title2)
-                                .fontWeight(.semibold)
+                        if settings.source == .myList {
+                            myListSection
+                        }
 
-                            HStack(spacing: 10) {
-                                ForEach(allEquipmentOptions, id: \.self) { item in
-                                    Button {
-                                        if selectedEquipment.contains(item) {
-                                            selectedEquipment.remove(item)
-                                        } else {
-                                            selectedEquipment.insert(item)
-                                        }
-                                    } label: {
-                                        VStack(spacing: 6) {
-                                            Image(systemName: equipmentIcon(item))
-                                                .font(.title2)
-                                            Text(equipmentLabel(item))
-                                                .font(.caption2)
-                                                .multilineTextAlignment(.center)
-                                                .lineLimit(2)
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(selectedEquipment.contains(item) ? Color.blue : Color.gray.opacity(0.1))
-                                        .foregroundStyle(selectedEquipment.contains(item) ? .white : .primary)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
+                        if settings.source == .random {
+                            // Focus Areas
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Focus Areas")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+
+                                // Quick filters — multi-select: tap to toggle each group
+                                focusAreaFilterRow
+
                             }
-                        }
+                            .id("focusAreasSection")
 
-                        // Difficulty — multi-select: tap to toggle each level
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Difficulty")
-                                .font(.title2)
-                                .fontWeight(.semibold)
+                            // Equipment Available
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Equipment Available")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
 
-                            difficultyFilterRow
-                        }
-                        .id("difficultySection")
-
-                        // Favorites — restrict the pool to starred exercises only
-                        if !favorites.names.isEmpty {
-                            Toggle(isOn: $favoritesOnly) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: favoritesOnly ? "star.fill" : "star")
-                                        .foregroundStyle(.yellow)
-                                        .frame(width: 22)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Favorites Only")
-                                            .font(.subheadline)
-                                            .fontWeight(.medium)
-                                        Text("Only use exercises you've starred on the Exercises tab")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                HStack(spacing: 10) {
+                                    ForEach(allEquipmentOptions, id: \.self) { item in
+                                        Button {
+                                            if selectedEquipment.contains(item) {
+                                                selectedEquipment.remove(item)
+                                            } else {
+                                                selectedEquipment.insert(item)
+                                            }
+                                        } label: {
+                                            VStack(spacing: 6) {
+                                                Image(systemName: equipmentIcon(item))
+                                                    .font(.title2)
+                                                Text(equipmentLabel(item))
+                                                    .font(.caption2)
+                                                    .multilineTextAlignment(.center)
+                                                    .lineLimit(2)
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(selectedEquipment.contains(item) ? Color.blue : Color.gray.opacity(0.1))
+                                            .foregroundStyle(selectedEquipment.contains(item) ? .white : .primary)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                        }
+                                        .buttonStyle(.plain)
                                     }
                                 }
                             }
-                            .toggleStyle(.switch)
+
+                            // Difficulty — multi-select: tap to toggle each level
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Difficulty")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+
+                                difficultyFilterRow
+                            }
+                            .id("difficultySection")
+
+                            // Favorites — restrict the pool to starred exercises only
+                            if !favorites.names.isEmpty {
+                                Toggle(isOn: $favoritesOnly) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: favoritesOnly ? "star.fill" : "star")
+                                            .foregroundStyle(.yellow)
+                                            .frame(width: 22)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Favorites Only")
+                                                .font(.subheadline)
+                                                .fontWeight(.medium)
+                                            Text("Only use exercises you've starred on the Exercises tab")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                                .toggleStyle(.switch)
+                            }
                         }
 
                         // Intention — single-select icon chips
@@ -433,9 +522,11 @@ struct WorkoutGeneratorView: View {
 
                         // Generate Button
                         Button {
-                            if selectedFocusAreas.isEmpty {
+                            if settings.source == .myList && queue.items.isEmpty {
+                                withAnimation { proxy.scrollTo("myListSection", anchor: .top) }
+                            } else if settings.source == .random && selectedFocusAreas.isEmpty {
                                 withAnimation { proxy.scrollTo("focusAreasSection", anchor: .top) }
-                            } else if selectedDifficulties.isEmpty {
+                            } else if settings.source == .random && selectedDifficulties.isEmpty {
                                 withAnimation { proxy.scrollTo("difficultySection", anchor: .top) }
                             } else {
                                 generateWorkout()
@@ -452,9 +543,11 @@ struct WorkoutGeneratorView: View {
                                     ProgressView()
                                         .scaleEffect(0.8)
                                     Text("Generating workout...")
-                                } else if selectedFocusAreas.isEmpty {
+                                } else if settings.source == .myList && queue.items.isEmpty {
+                                    Text("Add exercises to My List first")
+                                } else if settings.source == .random && selectedFocusAreas.isEmpty {
                                     Text("Focus Area(s) must be selected")
-                                } else if selectedDifficulties.isEmpty {
+                                } else if settings.source == .random && selectedDifficulties.isEmpty {
                                     Text("Difficulty must be selected")
                                 } else {
                                     Text("Generate Workout")
@@ -627,7 +720,7 @@ struct WorkoutGeneratorView: View {
                 // are guaranteed to agree.
                 timing: timing,
                 intention: selectedIntention,
-                selectedFocusAreas: selectedFocusAreas,
+                selectedFocusAreas: activeFocusAreas,
                 enableSound_iOS_tv_vision: enableSound_iOS_tv_vision,
                 enableHaptics_iOS_vision: enableHaptics_iOS_vision,
                 enableSound_macOS: enableSound_macOS,
@@ -764,48 +857,11 @@ struct WorkoutGeneratorView: View {
         isGenerating = true
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let allowedLevels = Array(selectedDifficulties)
-            var pool: [Exercise] = []
-
-            // Build exercise pool, filtered by selected equipment
-            for area in selectedFocusAreas {
-                for level in allowedLevels {
-                    if let areaExercises = exercises[area],
-                       let levelExercises = areaExercises[level] {
-                        let available = levelExercises.filter { ex in
-                            ex.equipment.contains { selectedEquipment.contains($0) }
-                        }
-                        pool.append(contentsOf: available)
-                    }
-                }
-            }
-
-            // Cardio bonus: fold in exercises cross-tagged additionalCategories: ["Cardio"]
-            // from other focus areas (e.g. Squat Jumps under Legs, Mountain Climbers under
-            // Core) even when that area isn't itself selected — mirrors how stretch routines
-            // pull secondary-category exercises via exercisesByAdditionalCategory.
-            if selectedFocusAreas.contains("Cardio") {
-                let poolNames = Set(pool.map { $0.name })
-                let cardioByLevel = catalog.exercisesByAdditionalCategoryAndDifficulty["Cardio"] ?? [:]
-                for level in allowedLevels {
-                    guard let levelExercises = cardioByLevel[level] else { continue }
-                    let available = levelExercises.filter { ex in
-                        !poolNames.contains(ex.name) && ex.equipment.contains { selectedEquipment.contains($0) }
-                    }
-                    pool.append(contentsOf: available)
-                }
-            }
-
-            // Merge user-defined custom exercises
-            for custom in customExerciseStore.exercises {
-                if selectedFocusAreas.contains(custom.focusArea) && allowedLevels.contains(custom.difficulty) && selectedEquipment.contains("None") {
-                    pool.append(Exercise(name: custom.name, videoPath: nil, equipment: ["None"]))
-                }
-            }
-
-            if favoritesOnly {
-                pool = pool.filter { favorites.isFavorite($0.name) }
-            }
+            // Random draws from the focus areas and filters; My List uses the queue instead.
+            let usingList = settings.source == .myList
+            let performAll = settings.usesPerformAll
+            let listed = usingList ? myListExercises() : []
+            let pool: [Exercise] = usingList ? uniqueByName(listed) : randomPool()
 
             guard !pool.isEmpty else {
                 isGenerating = false
@@ -817,7 +873,9 @@ struct WorkoutGeneratorView: View {
             if timerStyle.isLadder {
                 let takeAway = timerStyle == .addOnTakeAway
                 // A ladder beyond ~10 rungs is impractical to remember, let alone perform.
-                let units = ladderUnits(from: pool, maxUnits: 10)
+                let units = performAll
+                    ? orderedLadderUnits(from: listed, maxUnits: 10)
+                    : ladderUnits(from: pool, maxUnits: 10)
                 guard !units.isEmpty else {
                     isGenerating = false
                     return
@@ -880,7 +938,17 @@ struct WorkoutGeneratorView: View {
             }
 
             // Create balanced routine
-            let selected = createBalancedRoutine(from: pool, maxCount: maxExercises)
+            // Perform all uses the list as written; everything else (Random, or Draw from) picks
+            // from the pool. Blocks needs exactly one set's worth of slots, so it takes the first
+            // `maxExercises` in order and cycles the list if it is shorter.
+            let selected: [Exercise]
+            if performAll {
+                selected = timerStyle == .standard
+                    ? orderedUnits(listed).flatMap { $0 }
+                    : GeneratorSettings.fitUnits(orderedUnits(listed), toSlots: maxExercises)
+            } else {
+                selected = createBalancedRoutine(from: pool, maxCount: maxExercises)
+            }
 
             // Build final routine with rests
             var routine: [Exercise] = []
@@ -952,6 +1020,94 @@ struct WorkoutGeneratorView: View {
                 showCustomTimers = true
             }
         }
+    }
+
+    // MARK: - My List source
+
+    /// The My List queue as Exercise values, in order, duplicates kept. Catalog exercises keep
+    /// their video, equipment and single-sided info; a My Exercises entry has no catalog record,
+    /// so it becomes a basic exercise, the same way the random pool treats custom exercises.
+    private func myListExercises() -> [Exercise] {
+        var byName: [String: Exercise] = [:]
+        for (_, byDifficulty) in exercises {
+            for (_, list) in byDifficulty {
+                for exercise in list where byName[exercise.name] == nil {
+                    byName[exercise.name] = exercise
+                }
+            }
+        }
+        return queue.items.map { item in
+            byName[item.name] ?? Exercise(name: item.name, videoPath: nil, equipment: ["None"])
+        }
+    }
+
+    private func uniqueByName(_ list: [Exercise]) -> [Exercise] {
+        var seen = Set<String>()
+        return list.filter { seen.insert($0.name).inserted }
+    }
+
+    /// The list as shuffle-safe units (a single-sided exercise's Left/Right pair stays together),
+    /// in list order — or shuffled, when Shuffle order is on.
+    private func orderedUnits(_ list: [Exercise]) -> [[Exercise]] {
+        let units = list.map { expandSides($0) }
+        return settings.shuffleListOrder ? units.shuffled() : units
+    }
+
+    /// Add-On ladders from the list: each rung is one listed exercise (deduplicated), in order.
+    private func orderedLadderUnits(from list: [Exercise], maxUnits: Int) -> [[Exercise]] {
+        var seen = Set<String>()
+        let distinct = list.filter { seen.insert($0.name).inserted }
+        return Array(orderedUnits(distinct).prefix(maxUnits))
+    }
+
+
+
+    /// The Random source: exercises from the selected focus areas, difficulties and equipment,
+    /// plus matching custom exercises, optionally limited to favorites.
+    private func randomPool() -> [Exercise] {
+        let allowedLevels = Array(selectedDifficulties)
+        var pool: [Exercise] = []
+
+        // Build exercise pool, filtered by selected equipment
+        for area in selectedFocusAreas {
+            for level in allowedLevels {
+                if let areaExercises = exercises[area],
+                   let levelExercises = areaExercises[level] {
+                    let available = levelExercises.filter { ex in
+                        ex.equipment.contains { selectedEquipment.contains($0) }
+                    }
+                    pool.append(contentsOf: available)
+                }
+            }
+        }
+
+        // Cardio bonus: fold in exercises cross-tagged additionalCategories: ["Cardio"]
+        // from other focus areas (e.g. Squat Jumps under Legs, Mountain Climbers under
+        // Core) even when that area isn't itself selected — mirrors how stretch routines
+        // pull secondary-category exercises via exercisesByAdditionalCategory.
+        if selectedFocusAreas.contains("Cardio") {
+            let poolNames = Set(pool.map { $0.name })
+            let cardioByLevel = catalog.exercisesByAdditionalCategoryAndDifficulty["Cardio"] ?? [:]
+            for level in allowedLevels {
+                guard let levelExercises = cardioByLevel[level] else { continue }
+                let available = levelExercises.filter { ex in
+                    !poolNames.contains(ex.name) && ex.equipment.contains { selectedEquipment.contains($0) }
+                }
+                pool.append(contentsOf: available)
+            }
+        }
+
+        // Merge user-defined custom exercises
+        for custom in customExerciseStore.exercises {
+            if selectedFocusAreas.contains(custom.focusArea) && allowedLevels.contains(custom.difficulty) && selectedEquipment.contains("None") {
+                pool.append(Exercise(name: custom.name, videoPath: nil, equipment: ["None"]))
+            }
+        }
+
+        if favoritesOnly {
+            pool = pool.filter { favorites.isFavorite($0.name) }
+        }
+        return pool
     }
 
     /// Gives each Standard-style work slot its own randomly-picked duration from the same
@@ -1040,7 +1196,7 @@ struct WorkoutGeneratorView: View {
     private func matchingSelectedFocus(_ candidates: [Exercise]) -> [Exercise] {
         let matched = candidates.filter { exercise in
             exercise.relatedFocusAreas.isEmpty
-                || !Set(exercise.relatedFocusAreas).isDisjoint(with: selectedFocusAreas)
+                || !Set(exercise.relatedFocusAreas).isDisjoint(with: activeFocusAreas)
         }
         return matched.isEmpty ? candidates : matched
     }
@@ -1221,12 +1377,14 @@ struct WorkoutGeneratorView: View {
         // Sub-areas ("Core: Strength") are named for their parent so the title doesn't read
         // "Core & Core: Strength Workout".
         var seenAreas = Set<String>()
-        let focusLabel = selectedFocusAreas.sorted()
+        let focusLabel = activeFocusAreas.sorted()
             .map { $0.components(separatedBy: ":").first ?? $0 }
             .filter { seenAreas.insert($0).inserted }
             .prefix(2)
             .joined(separator: " & ")
-        let routineName = focusLabel.isEmpty ? "My Workout" : "\(focusLabel) Workout"
+        let routineName = focusLabel.isEmpty
+            ? (settings.source == .myList ? "My List Workout" : "My Workout")
+            : "\(focusLabel) Workout"
         let routine = SavedWorkoutRoutine(
             name: routineName,
             routineDescription: "",
@@ -1237,7 +1395,7 @@ struct WorkoutGeneratorView: View {
             systemImage: "dumbbell.fill",
             // Remembered so replaying from Saved is logged the way the live run would be
             // (a Core-only workout stays Core Training instead of being guessed again).
-            kind: SavedRoutineKind.forFocusAreas(selectedFocusAreas)
+            kind: SavedRoutineKind.forFocusAreas(activeFocusAreas)
         )
         activeSheet = .saveRoutine(routine)
     }

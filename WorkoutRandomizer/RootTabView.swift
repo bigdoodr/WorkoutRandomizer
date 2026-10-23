@@ -38,7 +38,10 @@ struct RootTabView: View {
             // to. (SettingsView is the exception: it already wraps itself in one.)
             Tab("Generate", systemImage: "figure.mixed.cardio", value: AppTab.generator) {
                 NavigationStack {
-                    GenerateHubView(onOpenTimer: { selection = .timer })
+                    GenerateHubView(
+                        onOpenTimer: { selection = .timer },
+                        onEditList: { showingBuilder = true }
+                    )
                 }
                 .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
@@ -104,6 +107,8 @@ private struct GenerateHubView: View {
 
     /// Opens the Timer tab (the workout generator's summary row calls it).
     var onOpenTimer: () -> Void = {}
+    /// Opens the Build Your Own sheet (the My List source's "Edit List").
+    var onEditList: () -> Void = {}
 
     @State private var segment: Segment = .workout
 
@@ -117,7 +122,7 @@ private struct GenerateHubView: View {
             .padding(.vertical, 8)
 
             ZStack {
-                WorkoutGeneratorView(onOpenTimer: onOpenTimer)
+                WorkoutGeneratorView(onOpenTimer: onOpenTimer, onEditList: onEditList)
                     .opacity(segment == .workout ? 1 : 0)
                     .allowsHitTesting(segment == .workout)
                     .accessibilityHidden(segment != .workout)

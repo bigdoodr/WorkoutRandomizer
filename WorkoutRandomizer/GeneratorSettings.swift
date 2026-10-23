@@ -11,10 +11,44 @@
 import SwiftUI
 import Observation
 
+/// Where a generated workout's exercises come from.
+enum GenerationSource: String, CaseIterable, Identifiable {
+    /// Drawn at random from the selected focus areas, difficulties and equipment.
+    case random = "Random"
+    /// The exercises queued in Build Your Own.
+    case myList = "My List"
+    var id: String { rawValue }
+}
+
+/// How My List feeds the generator.
+enum ListMode: String, CaseIterable, Identifiable {
+    /// Every listed exercise once, in order (or shuffled).
+    case performAll = "Perform all"
+    /// The list is a pool: the generator fills the chosen length by drawing from it.
+    case drawFrom = "Draw from"
+    var id: String { rawValue }
+}
+
 @MainActor
 @Observable
 final class GeneratorSettings {
     static let shared = GeneratorSettings()
+
+    // MARK: Source
+
+    var source: GenerationSource = .random
+    var listMode: ListMode = .performAll
+    /// Perform all only: shuffle the order of the list instead of running it as written.
+    var shuffleListOrder = false
+
+    /// Pyramid sizes its exercise count from Total Duration, so it can't "perform all" of an
+    /// arbitrary list — with Pyramid the list is always used as a pool.
+    var performAllAvailable: Bool { timerStyle != .pyramid }
+
+    /// True when generation should run the list exactly as written.
+    var usesPerformAll: Bool {
+        source == .myList && listMode == .performAll && performAllAvailable
+    }
 
     // MARK: Durations
 
@@ -141,6 +175,28 @@ final class GeneratorSettings {
 
     var coolDownSummary: String {
         "\(Self.coolDownHoldCount) × \(Self.coolDownSecondsPerHold)s"
+    }
+
+    /// Exactly `slots` exercise slots taken from the units in order, cycling through the list if
+    /// it runs out. A Left/Right pair is never split: a pair that won't fit the last slot is
+    /// skipped in favour of a later single. (Repeating Blocks needs a set of exactly this size.)
+    static func fitUnits(_ units: [[Exercise]], toSlots slots: Int) -> [Exercise] {
+        guard !units.isEmpty, slots > 0 else { return [] }
+        var result: [Exercise] = []
+        var index = 0
+        var skippedInARow = 0
+        while result.count < slots {
+            let unit = units[index % units.count]
+            index += 1
+            if result.count + unit.count <= slots {
+                result += unit
+                skippedInARow = 0
+            } else {
+                skippedInARow += 1
+                if skippedInARow >= units.count { break }   // only pairs left, and none fit
+            }
+        }
+        return result
     }
 
     func formatBlockTime(_ seconds: Int) -> String {
