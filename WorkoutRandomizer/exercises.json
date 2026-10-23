@@ -55,6 +55,18 @@
           ]
         }
       ],
+      "Hard": [
+        {
+          "name": "Incline Push-Up to Mountain Climber",
+          "videoPath": "/resources/InclinePushup2MountainClimber.mp4",
+          "equipment": [
+            "Chair/Box/Bench"
+          ],
+          "additionalCategories": [
+            "Cardio"
+          ]
+        }
+      ],
       "Expert/Advanced": [
         {
           "name": "One-Legged Skier Push-Ups",
@@ -133,6 +145,16 @@
         }
       ],
       "Hard": [
+        {
+          "name": "Striders to Alternating Lunges",
+          "videoPath": "/resources/Striders2AltLunges.mp4",
+          "equipment": [
+            "None"
+          ],
+          "additionalCategories": [
+            "Cardio"
+          ]
+        },
         {
           "name": "180° Squat Jumps",
           "videoPath": "/resources/180JumpSquats.mp4",
@@ -288,6 +310,56 @@
         {
           "name": "Squat to Knee Hold",
           "videoPath": "/resources/Squat2KneeHold.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Lateral Squats",
+          "videoPath": "/resources/LateralSquats.mp4",
+          "equipment": [
+            "None"
+          ],
+          "isMovement": true,
+          "additionalCategories": [
+            "Warm-Up: Hips"
+          ],
+          "relatedFocusAreas": [
+            "Legs",
+            "Legs: Strength",
+            "Glutes"
+          ]
+        },
+        {
+          "name": "Squat to Inchworms",
+          "videoPath": "/resources/Squat2Inchworms.mp4",
+          "equipment": [
+            "None"
+          ],
+          "isMovement": true,
+          "additionalCategories": [
+            "Warm-Up: Full Body",
+            "Cardio"
+          ],
+          "relatedFocusAreas": [
+            "Legs",
+            "Legs: Strength",
+            "Core",
+            "Shoulders"
+          ]
+        },
+        {
+          "name": "Squat to Side Kicks",
+          "videoPath": "/resources/Squat2SideKicks.mp4",
+          "equipment": [
+            "None"
+          ]
+        }
+      ],
+      "Hard": [
+        {
+          "name": "Alternating Rainbow Lunges",
+          "videoPath": "/resources/AltRainbowLunges.mp4",
           "equipment": [
             "None"
           ]
@@ -454,6 +526,13 @@
           "equipment": [
             "None"
           ]
+        },
+        {
+          "name": "1 Up 1 Down",
+          "videoPath": "/resources/1Up1Down.mp4",
+          "equipment": [
+            "None"
+          ]
         }
       ],
       "Hard": [
@@ -507,6 +586,16 @@
           "videoPath": "/resources/SprinterSitUps.mp4",
           "equipment": [
             "None"
+          ]
+        },
+        {
+          "name": "Alpine Climbers",
+          "videoPath": "/resources/AlpineClimbers.mp4",
+          "equipment": [
+            "None"
+          ],
+          "additionalCategories": [
+            "Cardio"
           ]
         }
       ],
@@ -625,6 +714,13 @@
           "equipment": [
             "None"
           ]
+        },
+        {
+          "name": "Hollow Rocks",
+          "videoPath": "/resources/HollowRocks.mp4",
+          "equipment": [
+            "None"
+          ]
         }
       ]
     },
@@ -680,6 +776,51 @@
           "equipment": [
             "None"
           ]
+        },
+        {
+          "name": "Air Jacks",
+          "videoPath": "/resources/AirJacks.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Butt Kickers",
+          "videoPath": "/resources/ButtKickers.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Fast Feet",
+          "videoPath": "/resources/FastFeet.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Shadow Boxing: Jab, Cross, Elbows",
+          "videoPath": "/resources/ShadowBoxingV2-JabCrossElbows.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Burpees - Level 1",
+          "videoPath": "/resources/UpDownOut.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Lateral Shuffles to Squats",
+          "videoPath": "/resources/LateralShuffles2Squats.mp4",
+          "equipment": [
+            "None"
+          ],
+          "additionalCategories": [
+            "Legs"
+          ]
         }
       ],
       "Hard": [
@@ -693,6 +834,13 @@
         {
           "name": "High Knee Skier Hops",
           "videoPath": "/resources/HighKneeSkierHops.mp4",
+          "equipment": [
+            "None"
+          ]
+        },
+        {
+          "name": "Burpees - Level 2",
+          "videoPath": "/resources/BurpeeLvl2-UpDownOutJumps.mp4",
           "equipment": [
             "None"
           ]
