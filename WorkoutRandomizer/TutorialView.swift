@@ -1,18 +1,26 @@
 //  TutorialView.swift
 //  Bodyweight WorkoutRandomizer
 //
-//  The onboarding guide — both the full tour and the shorter "what's new" run.
+//  The onboarding guide — a short tour for newcomers, and a "What's New" run for returning users.
 //
-//  Every page records the version its feature arrived in. That one field is what lets the same
-//  view serve two jobs: show everything to someone opening the app for the first time, and show
-//  only the genuinely new pages to someone who has already been here. Adding a feature in a
-//  future release means adding a page and tagging it with that release — the filtering below
-//  needs no further edits.
+//  Two kinds of page, kept apart on purpose:
+//   • Tour pages describe the app as it is today. They carry no version, are rewritten whenever
+//     the app changes, and make up the full guide. Keep it short: a handful of pages, each
+//     covering one idea.
+//   • Update pages announce one change and are tagged with the release they first shipped in —
+//     a version *and* a build (`AppRelease`). They never appear in the tour; they exist only to
+//     tell someone who already knows the app what changed since they last looked.
 //
-//  Who sees what is decided by `lastSeenTutorialVersion`, which is written when the guide is
-//  finished or skipped. An empty value means the guide has never been completed under the
-//  version-aware scheme, which covers both a fresh install and every 1.x user upgrading to 2.0 —
-//  both get the full tour, which is exactly what the 2.0 release wants.
+//  What a returning user sees is every update page tagged after the last release they were
+//  walked through (and no later than the one running). The last-seen release is written when the
+//  guide is finished or skipped. Nothing recorded means a fresh install — or an upgrade from
+//  before this tracking — and gets the full tour. A release with no newer update pages passes in
+//  silence.
+//
+//  To document a new feature: add an update page to `updatePages` below, tagged with the version
+//  and the build number it will first ship in. Nothing else needs to change. Builds are only
+//  compared within a version, so a number that restarts per version works as well as one that
+//  keeps climbing; when unsure, tag the build you're about to upload.
 
 import SwiftUI
 
@@ -21,15 +29,15 @@ import SwiftUI
 struct TutorialView: View {
     /// Which run of the guide this is.
     enum Mode: Equatable {
-        /// Every page. First launch, or requested from Settings.
+        /// The tour. First launch, or requested from Settings.
         case full
-        /// Only pages introduced after the given version.
-        case whatsNew(since: String)
+        /// Only update pages tagged after the given release.
+        case whatsNew(since: AppRelease)
 
         var id: String {
             switch self {
             case .full: return "full"
-            case .whatsNew(let since): return "whatsNew-\(since)"
+            case .whatsNew(let since): return "whatsNew-\(since.displayName)"
             }
         }
     }
@@ -37,6 +45,7 @@ struct TutorialView: View {
     var mode: Mode = .full
 
     @AppStorage("lastSeenTutorialVersion") private var lastSeenTutorialVersion = ""
+    @AppStorage("lastSeenTutorialBuild") private var lastSeenTutorialBuild = 0
     @State private var page = 0
     @Environment(\.dismiss) private var dismiss
 
@@ -45,82 +54,107 @@ struct TutorialView: View {
         let body: String
         let icon: String
         let color: Color
-        /// App version this page's subject arrived in. Drives what a returning user still needs.
-        var since: String = "1.0"
-        /// A release summary rather than a feature explanation. Only worth showing while its
-        /// release is the current one — a 3.0 user meeting the app for the first time has no
-        /// use for "What's New in 2.0".
-        var isReleaseOverview: Bool = false
+        /// The release an update page first shipped in. Nil for tour pages.
+        var since: AppRelease? = nil
     }
 
-    // Static so the filtering below — and the caller's "is there anything new?" check — can run
-    // without standing up a view.
-    private static let allPages: [TutorialPage] = [
+    // MARK: Tour
+
+    private static let tourPages: [TutorialPage] = [
         TutorialPage(
-            title: "What's New in 2.0",
-            body: "The biggest update yet: a five-tab layout, two new ladder timer styles, Pyramid workouts that fit the length you asked for, optional warm-ups and cool-downs matched to your focus, video demos in the stretch player, and a proper Settings screen. The next few pages cover all of it.",
-            icon: "sparkles", color: .indigo, since: "2.0", isReleaseOverview: true
+            title: "Build a Workout",
+            body: "Pick a goal, then tap the icon chips for focus areas, difficulty and the equipment you have. Generate draws a balanced session from moves that match. Prefer stretching? Flip the picker at the top of Generate to Stretch. Want to choose the moves yourself? Set Source to My List.",
+            icon: "figure.mixed.cardio", color: .blue
         ),
         TutorialPage(
-            title: "Welcome & Your Goal",
-            body: "Generate custom bodyweight workouts tailored to your focus areas, difficulty, and equipment. Tell the app your goal — Fat Burn, Cardio Endurance, Strength, or General Fitness — and tap your HR Zone during a workout for tips matched to it.",
-            icon: "figure.run", color: .blue, since: "1.0"
+            title: "Set the Pace",
+            body: "The Timer tab controls how a session runs: timer style (Standard, Pyramid, Repeating Blocks or an Add-On ladder), work and rest times, and an optional warm-up and cool-down. After generating, Custom Timers lets you change any single exercise's time.",
+            icon: "timer", color: .green
         ),
         TutorialPage(
-            title: "Customize Every Session",
-            body: "Tap the icon chips to choose focus areas — one or many. Difficulty is multi-select too, so a session can mix Beginner and Medium. Tell the app what equipment you have and it only draws from moves you can do. Prefer just stretching? Switch the picker at the top of Generate to Stretch for a hold-based session of its own, with video demos.",
-            icon: "figure.mixed.cardio", color: .purple, since: "1.0"
+            title: "Find, Save & Share",
+            body: "Exercises is the full catalog with demo videos — Library for built-in moves, Mine for your own. Swipe or long-press any move to add it to a routine you're building. Saved keeps routines in folders; save anything you generate or build, and export a routine to a file to share it.",
+            icon: "list.bullet.rectangle.portrait", color: .purple
         ),
         TutorialPage(
-            title: "Getting Around & Settings",
-            body: "Five tabs along the bottom. Generate builds a workout, or a stretch-only session from its Stretch picker. Timer sets the timer style, durations, rest, and warm-up/cool-down that Generate applies. Exercises browses the whole catalog with demo videos and holds the moves you add yourself under Mine. Saved holds curated routines and your own. Settings is where video, sound, and haptics all stick between launches — and you can reopen this guide any time.",
-            icon: "square.grid.2x2.fill", color: .cyan, since: "2.0"
+            title: "Train & Track",
+            body: "While you work out you'll see live exercise time, heart-rate zone and burn type, and the recap shows time, calories and heart rate. Pair an Apple Watch for live heart rate and to start or pause from your wrist. In Settings, add your age for accurate zones, tune video and sound, or reopen this guide.",
+            icon: "applewatch", color: .red
+        ),
+    ]
+
+    // MARK: Updates
+
+    private static let updatePages: [TutorialPage] = [
+        TutorialPage(
+            title: "Build Your Own & Favorites",
+            body: "Assemble a routine move by move with Build Your Own, and star favorites so they're easy to find. There's a new HIIT intention, longer rests between full Repeating Blocks cycles, and pause and skip controls on Apple Watch.",
+            icon: "plus.rectangle.on.rectangle", color: .orange, since: AppRelease("2.1")
         ),
         TutorialPage(
-            title: "Timer & Pacing Options",
-            body: "Standard runs a steady work/rest cycle. Pyramid ramps up and back down across the length you picked. Repeating Blocks cycles the same group of exercises. Add-On builds a ladder; Add-On + Take Away climbs then peels back off. Switch on a warm-up or cool-down in the Generate tab — both drawn from stretches matching your focus. Need one exercise longer than the rest? Custom Timers lets you set any slot by hand, and it follows the routine everywhere — playback, Watch, and anything you save.",
-            icon: "timer", color: .green, since: "2.0"
+            title: "Heart-Rate Zones",
+            body: "Zones now follow you. Add your age in Settings and heart-rate zones, live tips and the recap all use your own numbers. A badge on the Settings tab shows until you've set it.",
+            icon: "heart.text.square", color: .pink, since: AppRelease("2.2")
         ),
         TutorialPage(
-            title: "Saved & Shared Routines",
-            body: "The Saved tab has curated workouts — Athlean-X morning stretches, a bedtime routine, and a 10-minute ab circuit — each with per-exercise timers built in. Anything you generate, stretch, or build can be saved there into a folder of your choosing. Swipe a routine to export it to a file, and use the import button to bring one back later.",
-            icon: "folder.fill", color: .brown, since: "1.4"
+            title: "Timer Tab & My List",
+            body: "Timer style, durations, rest and warm-up/cool-down now live on their own Timer tab. On Generate, set Source to My List to run the moves you queued — all of them in order, or draw from them. Stretch is now a picker on Generate, and My Exercises is the Mine side of Exercises.",
+            icon: "timer", color: .green, since: AppRelease("2.3")
         ),
         TutorialPage(
-            title: "Track Your Progress",
-            body: "Add your own moves under Mine in the Exercises tab with a name, focus area, and difficulty — they join the pool the generator draws from. While a workout runs you get live exercise time, heart-rate zone, and burn type; the recap after shows total and working time, calories, and peak/average heart rate.",
-            icon: "chart.bar.fill", color: .mint, since: "1.3"
-        ),
-        TutorialPage(
-            title: "Apple Watch",
-            body: "Pair your Apple Watch for live heart rate, zone, and calorie data. You can start and stop a session from your wrist, and the Watch status line below the Start button always shows where the connection stands.",
-            icon: "applewatch", color: .red, since: "1.1"
+            title: "Folders, Sharing & Recaps",
+            body: "Saving now asks for a name and a folder. Saved sorts routines into folders, stretches can be saved too, and import and export sit right in the Saved tab. Workouts reach Apple Health as the right type — Flexibility, Core or Mixed Cardio — and Core-only recaps skip the alignment score.",
+            icon: "folder.fill", color: .brown, since: AppRelease("2.3")
         ),
     ]
 
     /// The pages a given run should show.
     private static func pages(for mode: Mode) -> [TutorialPage] {
-        allPages.filter { page in
-            if page.isReleaseOverview,
-               AppVersion.compare(page.since, AppVersion.current) != .orderedSame {
-                return false
-            }
-            switch mode {
-            case .full:
-                return true
-            case .whatsNew(let since):
-                return AppVersion.isNewer(page.since, than: since)
-            }
+        switch mode {
+        case .full:
+            return tourPages
+        case .whatsNew(let seen):
+            let current = AppRelease.current
+            // Oldest first, so a long absence reads as a story. `sorted` is stable, so pages
+            // tagged with the same release stay in the order they're written above.
+            let fresh = updatePages
+                .filter { page in
+                    guard let release = page.since else { return false }
+                    return release > seen && release <= current
+                }
+                .sorted { ($0.since ?? current) < ($1.since ?? current) }
+            // One page needs no introduction; several get a summary of the range they cover.
+            guard fresh.count > 1 else { return fresh }
+            return [overview(for: fresh, since: seen)] + fresh
         }
+    }
+
+    /// The opening page of a multi-page "What's New", worded from the range being shown.
+    private static func overview(for fresh: [TutorialPage], since seen: AppRelease) -> TutorialPage {
+        let versions = fresh.compactMap { $0.since?.version }
+        let distinct = versions.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        let range = distinct.count == 1
+            ? "in \(distinct[0])"
+            : "since \(seen.version)"
+        return TutorialPage(
+            title: "What's New",
+            body: "Here's what's changed \(range) — \(fresh.count) quick pages.",
+            icon: "sparkles", color: .indigo
+        )
     }
 
     private var pages: [TutorialPage] { Self.pages(for: mode) }
 
-    /// Whether a "what's new" run for someone last shown `version` would have anything to say.
-    /// The caller checks this before presenting, so a dot release that documents nothing new
+    /// Whether a "what's new" run for someone last shown `release` would have anything to say.
+    /// The caller checks this before presenting, so a release that documents nothing new
     /// doesn't greet everyone with an empty guide.
-    static func hasPages(newerThan version: String) -> Bool {
-        !pages(for: .whatsNew(since: version)).isEmpty
+    static func hasPages(newerThan release: AppRelease) -> Bool {
+        !pages(for: .whatsNew(since: release)).isEmpty
+    }
+
+    /// The release the user last finished the guide under, or nil if they never have.
+    static func lastSeenRelease(version: String, build: Int) -> AppRelease? {
+        version.isEmpty ? nil : AppRelease(version, build: build)
     }
 
     private var navigationTitle: String {
@@ -136,6 +170,7 @@ struct TutorialView: View {
 
     private func finish() {
         lastSeenTutorialVersion = AppVersion.current
+        lastSeenTutorialBuild = AppVersion.currentBuild
         dismiss()
     }
 

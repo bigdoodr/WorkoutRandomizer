@@ -48,7 +48,7 @@ struct RootTabView: View {
 
             // Timer style, durations, rest and warm-up/cool-down for generated workouts.
             Tab("Timer", systemImage: "timer", value: AppTab.timer) {
-                TimerSettingsView()
+                TimerSettingsView(onOpenGenerate: { selection = .generator })
                     .applyingQueueBarFallback(queue: queue, showingBuilder: $showingBuilder)
             }
 

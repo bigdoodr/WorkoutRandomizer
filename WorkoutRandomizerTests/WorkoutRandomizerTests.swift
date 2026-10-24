@@ -347,3 +347,28 @@ struct ActivityTypeTests {
         #expect(!PreloadedRoutines.absWorkout.isFlexibilitySession)
     }
 }
+
+// MARK: - Guide release tracking
+
+struct AppReleaseTests {
+    @Test func versionOrdersBeforeBuild() {
+        // Builds restart per version, so a higher build on an older version must not win.
+        #expect(AppRelease("2.2", build: 9) < AppRelease("2.3", build: 1))
+        #expect(AppRelease("2.3", build: 1) < AppRelease("2.3", build: 2))
+    }
+
+    @Test func equivalentVersionsAreEqual() {
+        #expect(AppRelease("2") == AppRelease("2.0"))
+        #expect(AppRelease("2.10") > AppRelease("2.9"))
+    }
+
+    @Test func nothingNewerThanCurrentMeansNoWhatsNew() {
+        #expect(!TutorialView.hasPages(newerThan: AppRelease("99.0")))
+        #expect(!TutorialView.hasPages(newerThan: AppRelease.current))
+    }
+
+    @Test func existingUsersSeeUpdatesSinceTwoPointZero() {
+        #expect(TutorialView.hasPages(newerThan: AppRelease("2.0")))
+        #expect(TutorialView.lastSeenRelease(version: "", build: 0) == nil)
+    }
+}

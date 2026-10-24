@@ -11,7 +11,7 @@
 
 import Foundation
 
-enum AppVersion {
+nonisolated enum AppVersion {
     /// CFBundleShortVersionString — the MARKETING_VERSION set in the Xcode target.
     static var current: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
@@ -37,4 +37,43 @@ enum AppVersion {
     static func isNewer(_ version: String, than other: String) -> Bool {
         compare(version, other) == .orderedDescending
     }
+
+    /// CFBundleVersion — the build number. Non-numeric reads as 0.
+    static var currentBuild: Int {
+        Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "") ?? 0
+    }
+}
+
+/// A specific build of the app: a marketing version plus its build number.
+///
+/// Ordering is version first, build second. Builds are never compared across versions — a build
+/// number may restart with each marketing version (2.2 b4 → 2.3 b1), so the build alone says
+/// nothing about which release is newer.
+nonisolated struct AppRelease: Comparable, Sendable {
+    let version: String
+    let build: Int
+
+    init(_ version: String, build: Int = 0) {
+        self.version = version
+        self.build = build
+    }
+
+    /// The running app.
+    static var current: AppRelease { AppRelease(AppVersion.current, build: AppVersion.currentBuild) }
+
+    /// Equal when the versions are numerically the same ("2" == "2.0") and the builds match.
+    static func == (lhs: AppRelease, rhs: AppRelease) -> Bool {
+        AppVersion.compare(lhs.version, rhs.version) == .orderedSame && lhs.build == rhs.build
+    }
+
+    static func < (lhs: AppRelease, rhs: AppRelease) -> Bool {
+        switch AppVersion.compare(lhs.version, rhs.version) {
+        case .orderedAscending: return true
+        case .orderedDescending: return false
+        case .orderedSame: return lhs.build < rhs.build
+        }
+    }
+
+    /// "2.3 (b4)", or just "2.3" when no build is known.
+    var displayName: String { build > 0 ? "\(version) (b\(build))" : version }
 }

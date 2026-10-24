@@ -11,6 +11,9 @@
 import SwiftUI
 
 struct TimerSettingsView: View {
+    /// Switches to the Generate tab. Supplied by the tab container; the bottom button calls it.
+    var onOpenGenerate: (() -> Void)? = nil
+
     @Bindable private var settings = GeneratorSettings.shared
 
     private var totalDuration: Int { get { settings.totalDuration } nonmutating set { settings.totalDuration = newValue } }
@@ -463,6 +466,22 @@ struct TimerSettingsView: View {
                                 }
                             }
                         }
+
+                    // Back to Generate — completes the loop with the Timer card on that screen.
+                    Button { onOpenGenerate?() } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left")
+                                .font(.footnote.weight(.semibold))
+                            Text("Back to Generate")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(.blue)
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    .padding(.top, 4)
                 }
                 .padding()
             }

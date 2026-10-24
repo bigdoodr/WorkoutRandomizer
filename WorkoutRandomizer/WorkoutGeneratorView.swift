@@ -56,6 +56,7 @@ struct WorkoutGeneratorView: View {
     /// install *and* anyone arriving from a build that predates this tracking, so every 1.x
     /// user gets the full 2.0 tour.
     @AppStorage("lastSeenTutorialVersion") private var lastSeenTutorialVersion = ""
+    @AppStorage("lastSeenTutorialBuild") private var lastSeenTutorialBuild = 0
     /// The guide and the intention explainer share one presentation. They used to be independent
     /// `.sheet` modifiers, and on a first launch the video-mode dialog and the guide both went up
     /// in the same pass — SwiftUI presented one, silently swallowed the other, and then refused
@@ -837,14 +838,15 @@ struct WorkoutGeneratorView: View {
     /// Which run of the guide, if any, this launch owes the user.
     ///
     /// Nothing recorded means the full tour — a first install, or an upgrade from a build that
-    /// predated this tracking. Otherwise only a genuinely newer version earns a "what's new",
-    /// and only when there are pages tagged for it: a release that documents nothing new should
-    /// pass in silence rather than open an empty guide.
+    /// predated this tracking. Otherwise the user gets a "what's new" only when the running
+    /// release is newer than the last one they saw *and* update pages are tagged in between: a
+    /// build that documents nothing new should pass in silence rather than open an empty guide.
     private func pendingGuideMode() -> TutorialView.Mode? {
-        guard !lastSeenTutorialVersion.isEmpty else { return .full }
-        guard AppVersion.isNewer(AppVersion.current, than: lastSeenTutorialVersion),
-              TutorialView.hasPages(newerThan: lastSeenTutorialVersion) else { return nil }
-        return .whatsNew(since: lastSeenTutorialVersion)
+        guard let seen = TutorialView.lastSeenRelease(version: lastSeenTutorialVersion, build: lastSeenTutorialBuild) else {
+            return .full
+        }
+        guard AppRelease.current > seen, TutorialView.hasPages(newerThan: seen) else { return nil }
+        return .whatsNew(since: seen)
     }
 
     /// Ask which video mode to use, but never while something else is on screen.
