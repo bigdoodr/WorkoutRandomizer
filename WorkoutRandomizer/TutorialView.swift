@@ -47,6 +47,7 @@ struct TutorialView: View {
     @AppStorage("lastSeenTutorialVersion") private var lastSeenTutorialVersion = ""
     @AppStorage("lastSeenTutorialBuild") private var lastSeenTutorialBuild = 0
     @State private var page = 0
+    @State private var hrZones = HRZoneSettings.shared
     @Environment(\.dismiss) private var dismiss
 
     private struct TutorialPage {
@@ -56,6 +57,8 @@ struct TutorialView: View {
         let color: Color
         /// The release an update page first shipped in. Nil for tour pages.
         var since: AppRelease? = nil
+        /// Shows the "Connect Apple Health" button (and its connected state) under the body.
+        var connectsHealth = false
     }
 
     // MARK: Tour
@@ -80,6 +83,11 @@ struct TutorialView: View {
             title: "Train & Track",
             body: "While you work out you'll see live exercise time, heart-rate zone and burn type, and the recap shows time, calories and heart rate. Pair an Apple Watch for live heart rate and to start or pause from your wrist. In Settings, add your age for accurate zones, tune video and sound, or reopen this guide.",
             icon: "applewatch", color: .red
+        ),
+        TutorialPage(
+            title: "Connect Apple Health",
+            body: "Allow Health access once and WorkoutRandomizer can show live heart rate and calories, save your workouts, and use your age and resting heart rate for zones — on your iPhone and Apple Watch together. You can also do this later in Settings.",
+            icon: "heart.fill", color: .pink, connectsHealth: true
         ),
     ]
 
@@ -237,6 +245,7 @@ struct TutorialView: View {
                 .padding(.bottom, 12)
             }
             .navigationTitle(navigationTitle)
+            .task { await hrZones.refreshHealthRequestStatus() }
 #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -249,6 +258,30 @@ struct TutorialView: View {
                 ToolbarItem { Button("Skip") { finish() } }
             }
 #endif
+        }
+    }
+
+    /// The Connect step: a button while Health still has a question for the user, a check once
+    /// it's answered (whichever way they answered — Settings → Privacy → Health changes it later),
+    /// and nothing while Health hasn't said yet.
+    @ViewBuilder
+    private var connectHealthControl: some View {
+        switch hrZones.healthRequestState {
+        case .pending:
+            Button {
+                Task { await hrZones.requestHealthAccess() }
+            } label: {
+                Label("Connect Apple Health", systemImage: "heart.fill")
+            }
+            .buttonStyle(.bordered)
+            .tint(.pink)
+            .controlSize(.large)
+        case .answered:
+            Label("Health connected", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .unknown:
+            // Keeps the layout from jumping once the answer arrives.
+            Color.clear.frame(height: 44)
         }
     }
 
@@ -269,6 +302,9 @@ struct TutorialView: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 32)
+            if p.connectsHealth {
+                connectHealthControl
+            }
             Spacer()
             if index == pages.count - 1 {
                 Button(mode == .full ? "Get Started" : "Done") { finish() }

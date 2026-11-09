@@ -41,6 +41,14 @@ struct WorkoutGeneratorView: View {
     @State private var selectedDifficulties: Set<String> = ["Beginner", "Medium", "Hard", "Expert/Advanced"]
     @State private var generatedRoutine: [Exercise] = []
     @State private var showingWorkout = false
+    /// Whether the running player was presented full screen. Decided once, when the workout
+    /// starts, and never re-evaluated: folding or unfolding a dual-screen iPhone mid-workout
+    /// changes the size class, and switching between sheet and cover would rebuild the player
+    /// and reset the session.
+    @State private var playerIsFullScreen = false
+#if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+#endif
     @State private var isGenerating = false
     @State private var scrollToGeneratedToken = UUID()
 
@@ -677,6 +685,7 @@ struct WorkoutGeneratorView: View {
                                 
                                 VStack(spacing: 8) {
                                     Button {
+                                        playerIsFullScreen = prefersFullScreenPlayer
                                         showingWorkout = true
                                     } label: {
                                         HStack {
@@ -714,23 +723,22 @@ struct WorkoutGeneratorView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingWorkout) {
-            WorkoutPlayerView(
-                routine: generatedRoutine,
-                // The same value the Custom Timers editor reads, so the preview and the clock
-                // are guaranteed to agree.
-                timing: timing,
-                intention: selectedIntention,
-                selectedFocusAreas: activeFocusAreas,
-                enableSound_iOS_tv_vision: enableSound_iOS_tv_vision,
-                enableHaptics_iOS_vision: enableHaptics_iOS_vision,
-                enableSound_macOS: enableSound_macOS,
-                ladderRoundStarts: ladderRoundStarts.isEmpty ? nil : ladderRoundStarts
-            )
-            // A stray scroll/swipe shouldn't be able to abruptly end an active routine —
-            // stopping now requires the confirmed Stop button inside the player.
-            .interactiveDismissDisabled(true)
+        // Compact width keeps the familiar sheet. Regular width (the inner display of a
+        // dual-screen iPhone, iPad) has the room for a full-screen player with a big video.
+        .sheet(isPresented: Binding(
+            get: { showingWorkout && !playerIsFullScreen },
+            set: { showingWorkout = $0 }
+        )) {
+            workoutPlayer
         }
+#if os(iOS)
+        .fullScreenCover(isPresented: Binding(
+            get: { showingWorkout && playerIsFullScreen },
+            set: { showingWorkout = $0 }
+        )) {
+            workoutPlayer
+        }
+#endif
         // One sheet for the guide and the intention explainer, so the two can never both try to
         // present. The video-mode prompt waits until neither is on screen.
         .sheet(item: $activeSheet, onDismiss: {
@@ -853,6 +861,33 @@ struct WorkoutGeneratorView: View {
     private func promptForVideoModeIfNeeded() {
         guard activeSheet == nil, !videoManager.didPromptForVideoMode else { return }
         showVideoModePrompt = true
+    }
+
+    /// Regular width gets the full-screen player; macOS has no full-screen cover.
+    private var prefersFullScreenPlayer: Bool {
+#if os(iOS)
+        horizontalSizeClass == .regular
+#else
+        false
+#endif
+    }
+
+    private var workoutPlayer: some View {
+        WorkoutPlayerView(
+            routine: generatedRoutine,
+            // The same value the Custom Timers editor reads, so the preview and the clock
+            // are guaranteed to agree.
+            timing: timing,
+            intention: selectedIntention,
+            selectedFocusAreas: activeFocusAreas,
+            enableSound_iOS_tv_vision: enableSound_iOS_tv_vision,
+            enableHaptics_iOS_vision: enableHaptics_iOS_vision,
+            enableSound_macOS: enableSound_macOS,
+            ladderRoundStarts: ladderRoundStarts.isEmpty ? nil : ladderRoundStarts
+        )
+        // A stray scroll/swipe shouldn't be able to abruptly end an active routine —
+        // stopping now requires the confirmed Stop button inside the player.
+        .interactiveDismissDisabled(true)
     }
 
     private func generateWorkout() {

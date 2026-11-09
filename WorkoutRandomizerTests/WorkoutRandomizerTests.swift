@@ -372,3 +372,128 @@ struct AppReleaseTests {
         #expect(TutorialView.lastSeenRelease(version: "", build: 0) == nil)
     }
 }
+
+// MARK: - Plan + clock anchor
+
+struct PlanClockTests {
+
+    /// Three slots: 20 s work, 10 s rest, 20 s work.
+    private func plan(id: String = "A", createdAt: TimeInterval = 1_000) -> WorkoutPlan {
+        WorkoutPlan(id: id, createdAt: createdAt, slots: [
+            PlanSlot(name: "Squats", isRest: false, duration: 20),
+            PlanSlot(name: "Rest", isRest: true, duration: 10),
+            PlanSlot(name: "Lunges", isRest: false, duration: 20),
+        ])
+    }
+
+    @Test func freshSlotReadsItsFullDuration() {
+        let p = plan()
+        let a = PlanClock.startAnchor(planID: "A", now: 100, source: .phone)
+        let pos = PlanClock.position(plan: p, anchor: a, at: 100)
+        #expect(pos.slotIndex == 0)
+        #expect(pos.remaining == 20)
+        #expect(!pos.isFinished)
+    }
+
+    @Test func advancesThroughSlotsFromTheClockAlone() {
+        let p = plan()
+        let a = PlanClock.startAnchor(planID: "A", now: 100, source: .phone)
+        // 25 s in: 5 s into the rest slot.
+        let rest = PlanClock.position(plan: p, anchor: a, at: 125)
+        #expect(rest.slotIndex == 1)
+        #expect(rest.remaining == 5)
+        // 31 s in: 1 s into the last slot.
+        let last = PlanClock.position(plan: p, anchor: a, at: 131)
+        #expect(last.slotIndex == 2)
+        #expect(last.remaining == 19)
+    }
+
+    @Test func finishesAtTheEndOfThePlan() {
+        let p = plan()
+        let a = PlanClock.startAnchor(planID: "A", now: 100, source: .phone)
+        let pos = PlanClock.position(plan: p, anchor: a, at: 150)
+        #expect(pos.isFinished)
+        #expect(pos.slotIndex == 3)
+        #expect(PlanClock.position(plan: p, anchor: a, at: 9_999).isFinished)
+    }
+
+    @Test func pauseFreezesTimeAndResumeContinues() {
+        let p = plan()
+        let start = PlanClock.startAnchor(planID: "A", now: 100, source: .phone)
+        let paused = PlanClock.paused(p, start, at: 112, by: .watch)
+        #expect(!paused.isRunning)
+        // However long it stays paused, the position doesn't move.
+        let during = PlanClock.position(plan: p, anchor: paused, at: 500)
+        #expect(during.slotIndex == 0)
+        #expect(during.remaining == 8)
+        // Resume at t=500: 8 s of slot 0 remain from there.
+        let resumed = PlanClock.resumed(p, paused, at: 500, by: .watch)
+        #expect(PlanClock.position(plan: p, anchor: resumed, at: 504).remaining == 4)
+        #expect(PlanClock.position(plan: p, anchor: resumed, at: 509).slotIndex == 1)
+    }
+
+    @Test func skipJumpsToTheNextSlotAndKeepsRunState() {
+        let p = plan()
+        let start = PlanClock.startAnchor(planID: "A", now: 100, source: .phone)
+        let skipped = PlanClock.skipped(p, start, at: 105, by: .watch)
+        #expect(skipped.isRunning)
+        let pos = PlanClock.position(plan: p, anchor: skipped, at: 105)
+        #expect(pos.slotIndex == 1)
+        #expect(pos.remaining == 10)
+        // Skipping while paused stays paused.
+        let paused = PlanClock.paused(p, start, at: 105, by: .phone)
+        let skippedPaused = PlanClock.skipped(p, paused, at: 200, by: .phone)
+        #expect(!skippedPaused.isRunning)
+        #expect(PlanClock.position(plan: p, anchor: skippedPaused, at: 400).slotIndex == 1)
+    }
+
+    @Test func skippingTheLastSlotEndsThePlan() {
+        let p = plan()
+        let a = PlanClock.anchor(planID: "A", slotIndex: 2, secondsIntoSlot: 3, isRunning: true, now: 100, source: .phone)
+        let skipped = PlanClock.skipped(p, a, at: 101, by: .watch)
+        #expect(PlanClock.position(plan: p, anchor: skipped, at: 101).isFinished)
+    }
+
+    @Test func newerAnchorWinsRegardlessOfArrivalOrder() {
+        let older = ClockAnchor(planID: "A", slotIndex: 0, secondsIntoSlot: 0, anchorDate: 100, isRunning: true, updatedAt: 100, source: .phone)
+        let newer = ClockAnchor(planID: "A", slotIndex: 1, secondsIntoSlot: 0, anchorDate: 110, isRunning: false, updatedAt: 110, source: .watch)
+        #expect(newer.supersedes(older))
+        #expect(!older.supersedes(newer))
+    }
+
+    @Test func anExactTieGoesToThePhone() {
+        let phone = ClockAnchor(planID: "A", slotIndex: 0, secondsIntoSlot: 0, anchorDate: 100, isRunning: true, updatedAt: 100, source: .phone)
+        let watch = ClockAnchor(planID: "A", slotIndex: 1, secondsIntoSlot: 0, anchorDate: 100, isRunning: true, updatedAt: 100, source: .watch)
+        #expect(phone.supersedes(watch))
+        #expect(!watch.supersedes(phone))
+    }
+
+    @Test func anchorForAnotherPlanIsStale() {
+        let current = ClockAnchor(planID: "A", slotIndex: 0, secondsIntoSlot: 0, anchorDate: 100, isRunning: true, updatedAt: 100, source: .phone)
+        let otherPlan = ClockAnchor(planID: "B", slotIndex: 2, secondsIntoSlot: 0, anchorDate: 999, isRunning: true, updatedAt: 999, source: .phone)
+        // Even though it's newer, it belongs to a different plan.
+        #expect(!otherPlan.supersedes(current))
+    }
+
+    @Test func aPlanIsAdoptedOnlyIfNewOrNewer() {
+        let current = plan(id: "A", createdAt: 1_000)
+        #expect(PlanClock.shouldAdopt(plan(id: "B", createdAt: 2_000), over: current))
+        #expect(!PlanClock.shouldAdopt(plan(id: "B", createdAt: 500), over: current))   // older plan arriving late
+        #expect(!PlanClock.shouldAdopt(plan(id: "A", createdAt: 1_000), over: current)) // same plan again
+        #expect(PlanClock.shouldAdopt(plan(id: "A"), over: nil))
+    }
+
+    @Test func positionSurvivesAnOutOfRangeAnchor() {
+        let p = plan()
+        let negative = ClockAnchor(planID: "A", slotIndex: -4, secondsIntoSlot: -3, anchorDate: 100, isRunning: true, updatedAt: 100, source: .phone)
+        #expect(PlanClock.position(plan: p, anchor: negative, at: 100).slotIndex == 0)
+        let beyond = ClockAnchor(planID: "A", slotIndex: 99, secondsIntoSlot: 0, anchorDate: 100, isRunning: true, updatedAt: 100, source: .phone)
+        #expect(PlanClock.position(plan: p, anchor: beyond, at: 100).isFinished)
+    }
+
+    @Test func planSyncRoundTripsThroughJSON() throws {
+        let sync = PlanSync(plan: plan(), anchor: PlanClock.startAnchor(planID: "A", now: 100, source: .phone))
+        let decoded = try JSONDecoder().decode(PlanSync.self, from: JSONEncoder().encode(sync))
+        #expect(decoded == sync)
+    }
+}

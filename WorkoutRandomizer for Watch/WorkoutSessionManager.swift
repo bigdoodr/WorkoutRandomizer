@@ -7,11 +7,13 @@ import Combine
 import HealthKit
 import WatchKit
 import WatchConnectivity
+import os
 
 class WorkoutSessionManager: NSObject, ObservableObject {
     static let shared = WorkoutSessionManager()
     
     let healthStore = HKHealthStore()
+    private static let healthLog = Logger(subsystem: "rocks.scruggsfam.productions.WorkoutRandomizer", category: "HealthAccess")
     
     @Published var isWorkoutActive = false
     @Published var heartRate: Double = 0
@@ -65,25 +67,34 @@ class WorkoutSessionManager: NSObject, ObservableObject {
     
     // MARK: - Authorization
     
-    func requestAuthorization() async -> Bool {
-        let typesToShare: Set<HKSampleType> = [
-            HKQuantityType.workoutType()
-        ]
-        
-        let typesToRead: Set<HKObjectType> = [
-            HKQuantityType.quantityType(forIdentifier: .heartRate)!,
-            HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!,
-            HKQuantityType.quantityType(forIdentifier: .cyclingPower)!,
-            HKObjectType.workoutType()
-        ]
-        
+    /// Set once the launch-time request has run, so it happens once per launch and never again
+    /// from a session start.
+    private var didRequestAuthorizationThisLaunch = false
+
+    /// Shows the Health sheet for the app's full list (`HealthAccess`) — but only if the user
+    /// hasn't answered it yet. Normally they already have: the iPhone asks first and that answer
+    /// covers the Watch, so this is a no-op. Call it once when the app launches, never while a
+    /// session is starting.
+    func requestAuthorizationIfNeeded() async {
+        guard !didRequestAuthorizationThisLaunch, HKHealthStore.isHealthDataAvailable() else { return }
+        didRequestAuthorizationThisLaunch = true
+        let status = await HealthAccess.requestStatus(for: healthStore)
+        guard status == .shouldRequest else {
+            Self.healthLog.notice("Health request status \(status.rawValue, privacy: .public): not prompting")
+            return
+        }
+        Self.healthLog.notice("Health request status \(status.rawValue, privacy: .public): requesting on the Watch")
         do {
-            try await healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead)
-            return true
+            try await HealthAccess.request(from: healthStore)
         } catch {
             print("HealthKit authorization failed: \(error.localizedDescription)")
-            return false
         }
+    }
+
+    /// Read-only check used as startWorkout()'s fallback: a session can only be saved once the
+    /// user has allowed workouts to be written. Never prompts.
+    var canSaveWorkouts: Bool {
+        healthStore.authorizationStatus(for: HKObjectType.workoutType()) == .sharingAuthorized
     }
     
     // MARK: - Workout Lifecycle
@@ -99,10 +110,10 @@ class WorkoutSessionManager: NSObject, ObservableObject {
         // handoff config; HIIT only when the watch was started with no word from the phone.
         let config = configuration ?? declaredConfiguration() ?? preparedConfiguration ?? defaultConfiguration()
         
-        // Request authorization first
-        let authorized = await requestAuthorization()
-        guard authorized else {
-            print("HealthKit not authorized, cannot start workout session")
+        // Fallback only: the request itself happens at launch (requestAuthorizationIfNeeded).
+        // Starting a session must never be what shows the Health sheet.
+        guard canSaveWorkouts else {
+            print("HealthKit not authorized for workouts; not starting a session")
             return
         }
         

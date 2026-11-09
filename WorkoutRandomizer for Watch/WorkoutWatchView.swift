@@ -212,11 +212,40 @@ struct WorkoutWatchView: View {
         }
     }
 
+    /// Shown at the end of the plan until the iPhone confirms the workout is over.
+    @ViewBuilder
+    private var finishingView: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+            Text("Finishing…")
+                .font(.headline)
+                .fontWeight(.semibold)
+            Text("Waiting for iPhone")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            // Never a dead end: if the iPhone doesn't answer, the wearer can still end tracking.
+            if sessionManager.isWorkoutActive {
+                Button(role: .destructive) {
+                    showEndWorkoutConfirmation = true
+                } label: {
+                    Label("End Workout", systemImage: "stop.fill")
+                        .font(.caption)
+                }
+                .padding(.top, 6)
+            }
+        }
+        .padding(.top, 12)
+    }
+
     @ViewBuilder
     private var activeWorkoutView: some View {
         ScrollView {
             VStack(spacing: 12) {
-                if let state = workoutState {
+                if connectivityManager.isFinishing {
+                    // The routine has run its course on the watch's own clock, but the iPhone
+                    // hasn't confirmed the workout is over (it may still be saving the recap).
+                    finishingView
+                } else if let state = workoutState {
                     if state.isRest {
                         // Rest / Get Ready phase: emphasize what's coming next
                         Text(state.currentExerciseName)
@@ -325,12 +354,17 @@ struct WorkoutWatchView: View {
                             .foregroundStyle(.green)
                     }
 
-                    // Pause/Resume + Skip — relayed to the iPhone, which owns the actual
-                    // timer state; the watch just asks it to flip pause or advance.
+                    // Pause/Resume + Skip. With a plan these act on the watch's own clock at once
+                    // and tell the iPhone (the newer of the two wins); without one they ask the
+                    // iPhone to flip pause or advance, as before.
                     if state.isPlaying {
                         HStack(spacing: 20) {
                             Button {
-                                connectivityManager.sendRequestPause()
+                                if connectivityManager.usesPlan {
+                                    connectivityManager.localTogglePause()
+                                } else {
+                                    connectivityManager.sendRequestPause()
+                                }
                             } label: {
                                 Image(systemName: state.isPaused ? "play.fill" : "pause.fill")
                                     .font(.title3)
@@ -339,7 +373,11 @@ struct WorkoutWatchView: View {
                             .tint(.blue)
 
                             Button {
-                                connectivityManager.sendRequestSkip()
+                                if connectivityManager.usesPlan {
+                                    connectivityManager.localSkip()
+                                } else {
+                                    connectivityManager.sendRequestSkip()
+                                }
                             } label: {
                                 Image(systemName: "forward.fill")
                                     .font(.title3)

@@ -1182,8 +1182,8 @@ struct SavedRoutinePlayerView: View {
                         }
 
                         #if os(iOS)
-                        if isPlaying && connectivityManager.isWatchConnected {
-                            HealthMetricsView(connectivityManager: connectivityManager)
+                        if isPlaying {
+                            WatchMetricsSection(connectivityManager: connectivityManager)
                                 .padding(.horizontal)
                                 .padding(.top, 4)
                         }
@@ -1680,13 +1680,18 @@ struct SavedRoutinePlayerView: View {
 #if canImport(HealthKit)
 #if os(iOS)
         guard HKHealthStore.isHealthDataAvailable() else { return }
+        // Health access comes first, on the iPhone: if the user hasn't answered yet, ask here
+        // before the Watch app is launched, so the Watch is never where they're first asked.
         let store = HKHealthStore()
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = routine.resolvedActivityType(intention: intention)
         configuration.locationType = .indoor
-        store.startWatchApp(with: configuration) { success, error in
-            if let error = error {
-                print("Failed to launch watch app: \(error.localizedDescription)")
+        Task { @MainActor in
+            await HRZoneSettings.shared.requestHealthAccessIfNeeded()
+            store.startWatchApp(with: configuration) { success, error in
+                if let error = error {
+                    print("Failed to launch watch app: \(error.localizedDescription)")
+                }
             }
         }
 #endif

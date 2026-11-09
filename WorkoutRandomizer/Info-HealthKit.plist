@@ -4,9 +4,9 @@
 <dict>
 	<!-- HealthKit Privacy Descriptions -->
 	<key>NSHealthShareUsageDescription</key>
-	<string>This app needs access to your health data to display workout metrics during your exercise routines.</string>
+	<string>WorkoutRandomizer reads your heart rate, active calories, workouts, age (date of birth) and resting heart rate from Apple Health to show live stats during your workout and to set your heart-rate zones.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>This app needs to save your workout data to HealthKit to track your fitness progress.</string>
+	<string>WorkoutRandomizer saves your completed workouts to Apple Health so your activity, calories and heart rate are recorded.</string>
 	
 	<!-- Watch Connectivity is enabled by default, but you can add this for clarity -->
 	<key>UIBackgroundModes</key>

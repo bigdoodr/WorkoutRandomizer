@@ -92,6 +92,11 @@
 			path = WorkoutRandomizerUITests;
 			sourceTree = "<group>";
 		};
+		CA5A4E012F5A000100A1B2C3 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		CAD959E22F413F0500AA3617 /* WorkoutRandomizer for Watch */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -141,6 +146,7 @@
 				2DF9E2882EF58FD500331F12 /* WorkoutRandomizerTests */,
 				2DF9E2922EF58FD500331F12 /* WorkoutRandomizerUITests */,
 				CAD959E22F413F0500AA3617 /* WorkoutRandomizer for Watch */,
+				CA5A4E012F5A000100A1B2C3 /* Shared */,
 				2DF9E2792EF58FD200331F12 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -175,6 +181,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				2DF9E27A2EF58FD200331F12 /* WorkoutRandomizer */,
+				CA5A4E012F5A000100A1B2C3 /* Shared */,
 			);
 			name = WorkoutRandomizer;
 			packageProductDependencies = (
@@ -242,6 +249,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				CA5A4E012F5A000100A1B2C3 /* Shared */,
 				CAD959E22F413F0500AA3617 /* WorkoutRandomizer for Watch */,
 			);
 			name = "WorkoutRandomizer for Watch";
@@ -530,8 +538,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = WorkoutRandomizer;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "WorkoutRandomizer reads your heart rate and active calories from Apple Watch to display them during your workout.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "WorkoutRandomizer starts and saves workout sessions to Health so your activity is recorded.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "WorkoutRandomizer reads your heart rate, active calories, workouts, age (date of birth) and resting heart rate from Apple Health to show live stats during your workout and to set your heart-rate zones.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "WorkoutRandomizer saves your completed workouts to Apple Health so your activity, calories and heart rate are recorded.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -593,8 +601,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = WorkoutRandomizer;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "WorkoutRandomizer reads your heart rate and active calories from Apple Watch to display them during your workout.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "WorkoutRandomizer starts and saves workout sessions to Health so your activity is recorded.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "WorkoutRandomizer reads your heart rate, active calories, workouts, age (date of birth) and resting heart rate from Apple Health to show live stats during your workout and to set your heart-rate zones.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "WorkoutRandomizer saves your completed workouts to Apple Health so your activity, calories and heart rate are recorded.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -746,8 +754,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "WorkoutRandomizer-for-Watch-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "WorkoutRandomizer Watch App";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "WorkoutRandomizer reads heart rate and calories during workouts";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "WorkoutRandomizer saves your workout data to Health";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "WorkoutRandomizer reads your heart rate, active calories, workouts, age (date of birth) and resting heart rate from Apple Health to show live stats during your workout and to set your heart-rate zones.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "WorkoutRandomizer saves your completed workouts to Apple Health so your activity, calories and heart rate are recorded.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = rocks.scruggsfam.productions.WorkoutRandomizer;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -783,8 +791,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "WorkoutRandomizer-for-Watch-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "WorkoutRandomizer Watch App";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "WorkoutRandomizer reads heart rate and calories during workouts";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "WorkoutRandomizer saves your workout data to Health";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "WorkoutRandomizer reads your heart rate, active calories, workouts, age (date of birth) and resting heart rate from Apple Health to show live stats during your workout and to set your heart-rate zones.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "WorkoutRandomizer saves your completed workouts to Apple Health so your activity, calories and heart rate are recorded.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = rocks.scruggsfam.productions.WorkoutRandomizer;
 				LD_RUNPATH_SEARCH_PATHS = (

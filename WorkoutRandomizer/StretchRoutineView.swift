@@ -909,15 +909,20 @@ struct StretchPlayerView: View {
     private func launchWatchWorkoutSession() {
 #if os(iOS)
         guard HKHealthStore.isHealthDataAvailable() else { return }
+        // Health access comes first, on the iPhone: if the user hasn't answered yet, ask here
+        // before the Watch app is launched, so the Watch is never where they're first asked.
         let store = HKHealthStore()
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = .flexibility
         configuration.locationType = .indoor
-        store.startWatchApp(with: configuration) { success, error in
-            if let error = error {
-                print("Failed to launch watch app: \(error.localizedDescription)")
-            } else if success {
-                print("Watch app launched for stretch session")
+        Task { @MainActor in
+            await HRZoneSettings.shared.requestHealthAccessIfNeeded()
+            store.startWatchApp(with: configuration) { success, error in
+                if let error = error {
+                    print("Failed to launch watch app: \(error.localizedDescription)")
+                } else if success {
+                    print("Watch app launched for stretch session")
+                }
             }
         }
 #endif

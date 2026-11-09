@@ -53,6 +53,10 @@ struct WorkoutPlayerView: View {
     @State private var peakHeartRate: Double = 0
     @State private var heartRateSamples: [Double] = []
     @State private var showingRecap = false
+    /// Whether the recap goes up full screen (regular width) rather than as a sheet. Latched when
+    /// the workout finishes, like the player's own presentation, so a fold change while it's
+    /// open can't swap the presentation style out from under it.
+    @State private var recapIsFullScreen = false
     @State private var showingStopConfirmation = false
     // HR intention banner
     @State private var intentionBanner: IntentionBannerPayload? = nil
@@ -125,211 +129,264 @@ struct WorkoutPlayerView: View {
         heartRateSamples.isEmpty ? 0 : heartRateSamples.reduce(0, +) / Double(heartRateSamples.count)
     }
 
+    // MARK: - Layout pieces
+    // Split out of `body` so the same pieces can sit in one column (portrait, compact) or in two
+    // (landscape on a regular-width display such as the Duo's inner screen).
+
+    /// The demo video (or its placeholder) at a given height.
+    @ViewBuilder
+    private func videoBlock(height videoHeight: CGFloat) -> some View {
+        if VideoMode(rawValue: videoManager.videoMode) != Optional.none {
+            if let player = avPlayer {
+                #if os(macOS)
+                AVPlayerLayerView(player: player)
+                    .frame(height: videoHeight)
+                    .cornerRadius(10)
+                #else
+                VideoPlayer(player: player)
+                    .frame(height: videoHeight)
+                    .cornerRadius(10)
+                #endif
+            } else if videoURL != nil {
+                Rectangle()
+                    .fill(Color.black.opacity(0.1))
+                    .frame(height: videoHeight)
+                    .cornerRadius(10)
+            } else if !isRest {
+                // Exercise has no video — show a subtle placeholder
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.gray.opacity(0.08))
+                    VStack(spacing: 6) {
+                        Image(systemName: "video.slash")
+                            .font(.title)
+                            .foregroundStyle(.secondary)
+                        Text("No Video Available")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(height: videoHeight)
+            }
+        }
+
+    }
+
+    /// Exercise name, countdown, progress and the live stats panels.
+    @ViewBuilder
+    private func infoBlock(compact: Bool) -> some View {
+        // Exercise Name
+        Text(currentExercise?.name ?? "Workout Complete")
+            .font(.title)
+            .fontWeight(.bold)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+
+        // Timer
+        Text(timeRemaining > 0 ? "\(timeRemaining)" : "00")
+            .font(.system(size: compact ? 48 : 64, weight: .bold, design: .monospaced))
+            .foregroundStyle(timeRemaining <= 3 && timeRemaining > 0 ? .red : .primary)
+
+        // Progress and Next up combined
+        VStack(spacing: 4) {
+            if currentIndex < routine.count {
+                Text("Exercise \(currentIndex + 1) of \(routine.count)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            if isPlaying && currentIndex < routine.count {
+                HStack(spacing: 4) {
+                    Text("Next:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(nextUpText)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
+                }
+            }
+        }
+
+        // Live workout stats (exercise time, HR zone, nutrient burn)
+        if isPlaying {
+            #if os(iOS)
+            WorkoutLiveStatsView(
+                exerciseTime: totalExerciseTime,
+                heartRate: connectivityManager.heartRate,
+                hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
+                intention: intention,
+                zoneThresholds: connectivityManager.watchZoneThresholds
+            )
+            .padding(.top, 4)
+            #else
+            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false, intention: intention)
+                .padding(.top, 4)
+            #endif
+        }
+
+        // Apple Watch metrics while a Watch workout is live; a one-line hint otherwise
+        #if os(iOS)
+        if isPlaying {
+            WatchMetricsSection(connectivityManager: connectivityManager)
+                .padding(.top, 4)
+        }
+        #endif
+
+        // Pyramid level indicator — shows the duration actually being counted
+        // down (durationForCurrentPosition), so a custom timer override for
+        // this exercise is reflected here instead of the un-overridden phase value.
+        if timing.style == .pyramid && isPlaying {
+            let phase = currentPyramidPhase
+            Text("Pyramid \(phase + 1) of \(timing.pyramidIntervals.count)  •  \(durationForCurrentPosition)s")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        // Blocks progress indicator — same rationale as above: use the
+        // override-aware duration rather than the raw block config value.
+        if timing.style == .blocks && isPlaying,
+           let position = timing.blockPosition(at: currentIndex, in: routine) {
+            Text("Block \(position.blockIndex + 1) of \(position.blockCount)  •  Set \(position.setNumber)  •  \(durationForCurrentPosition)s")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        // Ladder progress — without this you cannot tell how far up (or back
+        // down) the ladder you are, since the exercises simply repeat.
+        if timing.style.isLadder && isPlaying, let ladder = currentLadderRound {
+            Text("Round \(ladder.round) of \(ladder.total)  •  \(durationForCurrentPosition)s")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+    }
+
+    /// Start / Pause / Skip, with the Watch status line above Start. Sized by the caller so a short
+    /// screen gets a slimmer bar and the content above it keeps its room.
+    private func controlsBar(buttonSize: CGFloat, iconSize: CGFloat, verticalPadding: CGFloat) -> some View {
+
+                            VStack(spacing: 6) {
+        #if os(iOS)
+                            if !isPlaying {
+                                let watchMsg: String = {
+                                    if connectivityManager.isWatchReachable { return "You can also start from your Apple Watch" }
+                                    if connectivityManager.isWatchConnected { return "Watch Connected" }
+                                    return "Looking for Watch…"
+                                }()
+                                Label(watchMsg, systemImage: "applewatch")
+                                    .font(.caption)
+                                    .foregroundStyle(connectivityManager.isWatchReachable ? .secondary : .tertiary)
+                            }
+        #endif
+                            HStack(spacing: 40) {
+                                if !isPlaying {
+                                    Button {
+                                        startWorkout()
+                                    } label: {
+                                        VStack {
+                                            Image(systemName: "play.fill")
+                                                .font(.system(size: iconSize))
+                                            Text("Start")
+                                                .font(.caption)
+                                        }
+                                        .frame(width: buttonSize, height: buttonSize)
+                                        .background(.green)
+                                        .foregroundStyle(.white)
+                                        .clipShape(Circle())
+                                    }
+                                } else {
+                                    Button {
+                                        togglePause()
+                                    } label: {
+                                        VStack {
+                                            Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                                                .font(.system(size: iconSize))
+                                            Text(isPaused ? "Resume" : "Pause")
+                                                .font(.caption)
+                                        }
+                                        .frame(width: buttonSize, height: buttonSize)
+                                        .background(.blue)
+                                        .foregroundStyle(.white)
+                                        .clipShape(Circle())
+                                    }
+
+                                    Button {
+                                        skipExercise()
+                                    } label: {
+                                        VStack {
+                                            Image(systemName: "forward.fill")
+                                                .font(.system(size: iconSize))
+                                            Text("Skip")
+                                                .font(.caption)
+                                        }
+                                        .frame(width: buttonSize, height: buttonSize)
+                                        .background(.orange)
+                                        .foregroundStyle(.white)
+                                        .clipShape(Circle())
+                                    }
+                                }
+                            }
+                            }
+        .padding(.vertical, verticalPadding)
+        .frame(maxWidth: .infinity)
+        .background(.thinMaterial)
+        .shadow(radius: 2)
+        .padding(.horizontal)
+    }
+
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
                 let isLandscape = proxy.size.width > proxy.size.height
                 #if os(iOS)
-                let videoMaxH: CGFloat = horizontalSizeClass == .regular ? 240 : (isLandscape ? 110 : 180)
+                let isRegular = horizontalSizeClass == .regular
+                #else
+                let isRegular = false
+                #endif
+                // A short, narrow screen — the Duo's outer display, an iPhone SE. Everything gets
+                // a size down so the stats tile stays clear of the Pause/Skip bar instead of
+                // sliding under it.
+                let isCompactHeight = !isRegular && proxy.size.height < 720
+                #if os(iOS)
+                let videoMaxH: CGFloat = isRegular ? 420 : (isCompactHeight ? 120 : (isLandscape ? 110 : 180))
                 #else
                 let videoMaxH: CGFloat = 220
                 #endif
-                let videoHeight = min(proxy.size.height * 0.35, videoMaxH)
-                ScrollView {
-                    VStack(spacing: 16) {
-                        // Video
-                        if VideoMode(rawValue: videoManager.videoMode) != Optional.none {
-                            if let player = avPlayer {
-                                #if os(macOS)
-                                AVPlayerLayerView(player: player)
-                                    .frame(height: videoHeight)
-                                    .cornerRadius(10)
-                                #else
-                                VideoPlayer(player: player)
-                                    .frame(height: videoHeight)
-                                    .cornerRadius(10)
-                                #endif
-                            } else if videoURL != nil {
-                                Rectangle()
-                                    .fill(Color.black.opacity(0.1))
-                                    .frame(height: videoHeight)
-                                    .cornerRadius(10)
-                            } else if !isRest {
-                                // Exercise has no video — show a subtle placeholder
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill(Color.gray.opacity(0.08))
-                                    VStack(spacing: 6) {
-                                        Image(systemName: "video.slash")
-                                            .font(.title)
-                                            .foregroundStyle(.secondary)
-                                        Text("No Video Available")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .frame(height: videoHeight)
+                let videoHeight = min(proxy.size.height * (isCompactHeight ? 0.25 : (isRegular ? 0.4 : 0.35)), videoMaxH)
+                let sectionSpacing: CGFloat = isCompactHeight ? 10 : 16
+                let buttonSize: CGFloat = isCompactHeight ? 64 : 80
+                let iconSize: CGFloat = isCompactHeight ? 24 : 30
+                let barPadding: CGFloat = isCompactHeight ? 8 : 12
+                if isRegular && isLandscape {
+                    // Two columns: the video takes the wide side, the rest of the player sits
+                    // beside it and scrolls on its own if it needs to.
+                    let columnWidth = proxy.size.width * 0.58
+                    HStack(alignment: .top, spacing: 20) {
+                        videoBlock(height: min(columnWidth * 9 / 16, proxy.size.height - 180))
+                            .frame(width: columnWidth)
+                        ScrollView {
+                            VStack(spacing: sectionSpacing) {
+                                infoBlock(compact: false)
                             }
-                        }
-
-                        // Exercise Name
-                        Text(currentExercise?.name ?? "Workout Complete")
-                            .font(.title)
-                            .fontWeight(.bold)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.8)
-
-                        // Timer
-                        Text(timeRemaining > 0 ? "\(timeRemaining)" : "00")
-                            .font(.system(size: 64, weight: .bold, design: .monospaced))
-                            .foregroundStyle(timeRemaining <= 3 && timeRemaining > 0 ? .red : .primary)
-
-                        // Progress and Next up combined
-                        VStack(spacing: 4) {
-                            if currentIndex < routine.count {
-                                Text("Exercise \(currentIndex + 1) of \(routine.count)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            if isPlaying && currentIndex < routine.count {
-                                HStack(spacing: 4) {
-                                    Text("Next:")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text(nextUpText)
-                                        .font(.caption)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
-                                }
-                            }
-                        }
-                        
-                        // Live workout stats (exercise time, HR zone, nutrient burn)
-                        if isPlaying {
-                            #if os(iOS)
-                            WorkoutLiveStatsView(
-                                exerciseTime: totalExerciseTime,
-                                heartRate: connectivityManager.heartRate,
-                                hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
-                                intention: intention,
-                                zoneThresholds: connectivityManager.watchZoneThresholds
-                            )
-                            .padding(.top, 4)
-                            #else
-                            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false, intention: intention)
-                                .padding(.top, 4)
-                            #endif
-                        }
-
-                        // Apple Watch full metrics panel
-                        #if os(iOS)
-                        if isPlaying && connectivityManager.isWatchConnected {
-                            HealthMetricsView(connectivityManager: connectivityManager)
-                                .padding(.top, 4)
-                        }
-                        #endif
-
-                        // Pyramid level indicator — shows the duration actually being counted
-                        // down (durationForCurrentPosition), so a custom timer override for
-                        // this exercise is reflected here instead of the un-overridden phase value.
-                        if timing.style == .pyramid && isPlaying {
-                            let phase = currentPyramidPhase
-                            Text("Pyramid \(phase + 1) of \(timing.pyramidIntervals.count)  •  \(durationForCurrentPosition)s")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        // Blocks progress indicator — same rationale as above: use the
-                        // override-aware duration rather than the raw block config value.
-                        if timing.style == .blocks && isPlaying,
-                           let position = timing.blockPosition(at: currentIndex, in: routine) {
-                            Text("Block \(position.blockIndex + 1) of \(position.blockCount)  •  Set \(position.setNumber)  •  \(durationForCurrentPosition)s")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        // Ladder progress — without this you cannot tell how far up (or back
-                        // down) the ladder you are, since the exercises simply repeat.
-                        if timing.style.isLadder && isPlaying, let ladder = currentLadderRound {
-                            Text("Round \(ladder.round) of \(ladder.total)  •  \(durationForCurrentPosition)s")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                    }
-                    .frame(maxWidth: .infinity, alignment: .top)
-                    .padding()
-                }
-                .safeAreaInset(edge: .bottom) {
-                    VStack(spacing: 6) {
-#if os(iOS)
-                    if !isPlaying {
-                        let watchMsg: String = {
-                            if connectivityManager.isWatchReachable { return "You can also start from your Apple Watch" }
-                            if connectivityManager.isWatchConnected { return "Watch Connected" }
-                            return "Looking for Watch…"
-                        }()
-                        Label(watchMsg, systemImage: "applewatch")
-                            .font(.caption)
-                            .foregroundStyle(connectivityManager.isWatchReachable ? .secondary : .tertiary)
-                    }
-#endif
-                    HStack(spacing: 40) {
-                        if !isPlaying {
-                            Button {
-                                startWorkout()
-                            } label: {
-                                VStack {
-                                    Image(systemName: "play.fill")
-                                        .font(.system(size: 30))
-                                    Text("Start")
-                                        .font(.caption)
-                                }
-                                .frame(width: 80, height: 80)
-                                .background(.green)
-                                .foregroundStyle(.white)
-                                .clipShape(Circle())
-                            }
-                        } else {
-                            Button {
-                                togglePause()
-                            } label: {
-                                VStack {
-                                    Image(systemName: isPaused ? "play.fill" : "pause.fill")
-                                        .font(.system(size: 30))
-                                    Text(isPaused ? "Resume" : "Pause")
-                                        .font(.caption)
-                                }
-                                .frame(width: 80, height: 80)
-                                .background(.blue)
-                                .foregroundStyle(.white)
-                                .clipShape(Circle())
-                            }
-
-                            Button {
-                                skipExercise()
-                            } label: {
-                                VStack {
-                                    Image(systemName: "forward.fill")
-                                        .font(.system(size: 30))
-                                    Text("Skip")
-                                        .font(.caption)
-                                }
-                                .frame(width: 80, height: 80)
-                                .background(.orange)
-                                .foregroundStyle(.white)
-                                .clipShape(Circle())
-                            }
+                            .frame(maxWidth: .infinity, alignment: .top)
+                            .padding(.vertical)
                         }
                     }
-                    }
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity)
-                    .background(.thinMaterial)
-                    .shadow(radius: 2)
                     .padding(.horizontal)
+                    .padding(.top, 8)
+                    .safeAreaInset(edge: .bottom) { controlsBar(buttonSize: buttonSize, iconSize: iconSize, verticalPadding: barPadding) }
+                } else {
+                    ScrollView {
+                        VStack(spacing: sectionSpacing) {
+                            videoBlock(height: videoHeight)
+                            infoBlock(compact: isCompactHeight)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .top)
+                        .padding(isCompactHeight ? 10 : 16)
+                    }
+                    .safeAreaInset(edge: .bottom) { controlsBar(buttonSize: buttonSize, iconSize: iconSize, verticalPadding: barPadding) }
                 }
             }
             .navigationTitle("Workout")
@@ -418,6 +475,10 @@ struct WorkoutPlayerView: View {
                 if isPlaying { togglePause() }
             }
         }
+        // The Apple Watch made a newer clock anchor (its Pause / Resume / Skip) — follow it
+        .onChange(of: connectivityManager.incomingWatchAnchor) { _, anchor in
+            applyWatchAnchor(anchor)
+        }
         // The Apple Watch tapped Skip — advance one slot on the iPhone too
         .onChange(of: connectivityManager.watchRequestedSkip) { _, requested in
             if requested {
@@ -449,7 +510,23 @@ struct WorkoutPlayerView: View {
                 .transition(.opacity)
             }
         }
-        .sheet(isPresented: $showingRecap) {
+        .sheet(isPresented: Binding(
+            get: { showingRecap && !recapIsFullScreen },
+            set: { showingRecap = $0 }
+        )) {
+            recapView
+        }
+        #if os(iOS)
+        .fullScreenCover(isPresented: Binding(
+            get: { showingRecap && recapIsFullScreen },
+            set: { showingRecap = $0 }
+        )) {
+            recapView
+        }
+        #endif
+    }
+
+    private var recapView: some View {
             WorkoutRecapView(
                 completedExercises: completedExerciseNames,
                 totalExerciseTime: totalExerciseTime,
@@ -477,7 +554,6 @@ struct WorkoutPlayerView: View {
                     dismiss()
                 }
             )
-        }
     }
 
     private func prepareVideoForCurrentExercise(autoplay: Bool) {
@@ -780,10 +856,90 @@ struct WorkoutPlayerView: View {
         DispatchQueue.main.async {
             self.playFeedback(.start)
             self.prepareVideoForCurrentExercise(autoplay: true)
+            self.beginPlanSync()
             self.sendWorkoutStateToWatch()
             self.launchWatchWorkoutSession()
             self.startTimer()
         }
+    }
+
+    // MARK: - Plan + clock anchor (Apple Watch sync)
+
+    /// Sends the Watch the whole routine and where we are in it, so it can work out the current
+    /// exercise from its own clock instead of waiting on a message per transition.
+    private func beginPlanSync() {
+        #if os(iOS)
+        let now = Date().timeIntervalSince1970
+        let slots = routine.indices.map { index in
+            PlanSlot(name: routine[index].name,
+                     isRest: routine[index].name == "Rest",
+                     duration: timing.duration(at: index, in: routine))
+        }
+        let plan = WorkoutPlan(id: UUID().uuidString, createdAt: now, slots: slots,
+                               activityTypeRaw: resolvedActivityType.rawValue)
+        let anchor = PlanClock.anchor(planID: plan.id, slotIndex: currentIndex,
+                                      secondsIntoSlot: secondsIntoCurrentSlot,
+                                      isRunning: !isPaused, now: now, source: .phone)
+        connectivityManager.beginPlan(PlanSync(plan: plan, anchor: anchor))
+        #endif
+    }
+
+    /// How far into the current slot this player is, from what it is showing.
+    private var secondsIntoCurrentSlot: Double {
+        Double(max(0, durationForCurrentPosition - timeRemaining))
+    }
+
+    /// Tells the Watch where we are now. Called on Pause / Resume / Skip — the moments the Watch
+    /// can't work out for itself. (Ordinary transitions need no message: the Watch derives them.)
+    private func sendPhoneAnchor() {
+        #if os(iOS)
+        guard let planID = connectivityManager.latestPlanSync?.plan.id, currentIndex < routine.count else { return }
+        connectivityManager.sendAnchor(
+            PlanClock.anchor(planID: planID, slotIndex: currentIndex, secondsIntoSlot: secondsIntoCurrentSlot,
+                             isRunning: !isPaused, now: Date().timeIntervalSince1970, source: .phone)
+        )
+        #endif
+    }
+
+    /// The Watch made a newer anchor (Pause / Resume / Skip on the wrist): move this player to
+    /// match. Applied without sending an anchor back, so the two can't echo.
+    private func applyWatchAnchor(_ anchor: ClockAnchor?) {
+        #if os(iOS)
+        guard let anchor, isPlaying,
+              let sync = connectivityManager.latestPlanSync, sync.plan.id == anchor.planID else { return }
+        let position = PlanClock.position(plan: sync.plan, anchor: anchor, at: Date().timeIntervalSince1970)
+
+        func recordCurrentAsDone() {
+            if let ex = currentExercise, ex.name != "Rest" { completedExerciseNames.append(ex.name) }
+        }
+
+        if position.isFinished {
+            // Skipped past the last slot: close out the routine the way a normal finish does.
+            while currentIndex < routine.count - 1 {
+                recordCurrentAsDone()
+                currentIndex += 1
+            }
+            nextExercise()
+            return
+        }
+
+        let moved = position.slotIndex > currentIndex
+        while currentIndex < position.slotIndex {
+            recordCurrentAsDone()
+            currentIndex += 1
+        }
+        timeRemaining = position.remaining
+        if moved {
+            prepareVideoForCurrentExercise(autoplay: anchor.isRunning)
+            playFeedback(transitionFeedback(enteringIndex: currentIndex))
+        }
+        let shouldPause = !anchor.isRunning
+        if isPaused != shouldPause {
+            isPaused = shouldPause
+            if isPaused { avPlayer?.pause() } else { avPlayer?.play() }
+        }
+        sendWorkoutStateToWatch()
+        #endif
     }
 
     /// Keeps the screen awake during a workout session (iOS only).
@@ -818,15 +974,20 @@ struct WorkoutPlayerView: View {
     private func launchWatchWorkoutSession() {
         #if os(iOS)
         guard HKHealthStore.isHealthDataAvailable() else { return }
+        // Health access comes first, on the iPhone: if the user hasn't answered yet, ask here
+        // before the Watch app is launched, so the Watch is never where they're first asked.
         let store = HKHealthStore()
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = resolvedActivityType
         configuration.locationType = .indoor
-        store.startWatchApp(with: configuration) { success, error in
-            if let error = error {
-                print("Failed to launch watch app: \(error.localizedDescription)")
-            } else if success {
-                print("Watch app launched for workout session")
+        Task { @MainActor in
+            await HRZoneSettings.shared.requestHealthAccessIfNeeded()
+            store.startWatchApp(with: configuration) { success, error in
+                if let error = error {
+                    print("Failed to launch watch app: \(error.localizedDescription)")
+                } else if success {
+                    print("Watch app launched for workout session")
+                }
             }
         }
         #endif
@@ -906,6 +1067,7 @@ struct WorkoutPlayerView: View {
                 )
                 #endif
                 self.stopWorkout()
+                self.recapIsFullScreen = self.horizontalSizeClass == .regular
                 self.showingRecap = true
             }
             return
@@ -933,6 +1095,7 @@ struct WorkoutPlayerView: View {
     private func togglePause() {
         isPaused.toggle()
         playFeedback(.warning)
+        sendPhoneAnchor()
         sendWorkoutStateToWatch()
         #if os(iOS)
         connectivityManager.sendControlMessage(isPaused ? .workoutPaused : .workoutResumed)
@@ -943,6 +1106,9 @@ struct WorkoutPlayerView: View {
     private func skipExercise() {
         playFeedback(.warning)
         nextExercise()
+        // A skip is a jump the Watch can't derive; tell it where we landed (unless that was the
+        // end — the completion message covers that).
+        sendPhoneAnchor()
     }
     
     private func stopWorkout() {

@@ -23,11 +23,21 @@ struct SettingsView: View {
     @State private var downloadProgress: (completed: Int, total: Int)? = nil
     @State private var hrZones = HRZoneSettings.shared
     @State private var showingGuide = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
+                    // One Health sheet covers the iPhone and the Apple Watch. Shown only while
+                    // the system still has a request to make, so it disappears once answered.
+                    if hrZones.healthRequestPending {
+                        Button {
+                            Task { await hrZones.requestHealthAccess() }
+                        } label: {
+                            Label("Connect Apple Health", systemImage: "heart.fill")
+                        }
+                    }
                     NavigationLink {
                         HRZonesSettingsView()
                     } label: {
@@ -44,7 +54,11 @@ struct SettingsView: View {
                 } header: {
                     Text("Health")
                 } footer: {
-                    Text("See how your age maps to heart-rate zones, or set them yourself.")
+                    if hrZones.healthRequestPending {
+                        Text("Share heart rate, calories, workouts, age and resting heart rate with WorkoutRandomizer on your iPhone and Apple Watch. See how your age maps to heart-rate zones, or set them yourself.")
+                    } else {
+                        Text("See how your age maps to heart-rate zones, or set them yourself.")
+                    }
                 }
 
                 Section {
@@ -112,8 +126,16 @@ struct SettingsView: View {
 #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif
-            .sheet(isPresented: $showingGuide) {
+            .sheet(isPresented: $showingGuide, onDismiss: {
+                Task { await hrZones.refreshHealthRequestStatus() }
+            }) {
                 TutorialView(mode: .full)
+            }
+            // Re-check on appear and whenever the app returns: the answer can change in the
+            // Health app or from the guide's Connect step.
+            .task { await hrZones.refreshHealthRequestStatus() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await hrZones.refreshHealthRequestStatus() } }
             }
         }
     }

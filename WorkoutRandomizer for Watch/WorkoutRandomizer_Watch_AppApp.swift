@@ -15,7 +15,13 @@ class AppDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCenterDele
 
     func applicationDidFinishLaunching() {
         UNUserNotificationCenter.current().delegate = self
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        // Ask for Health, then notifications — one prompt at a time, both at launch and neither
+        // during session startup. The Health request is a no-op once the user has answered it
+        // (normally on the iPhone first).
+        Task { @MainActor in
+            await WorkoutSessionManager.shared.requestAuthorizationIfNeeded()
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+        }
     }
 
     func handle(_ workoutConfiguration: HKWorkoutConfiguration) {

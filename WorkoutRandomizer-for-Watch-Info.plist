@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>NSHealthShareUsageDescription</key>
-	<string>WorkoutRandomizer for Watch reads your heart rate and active calories during your workout.</string>
+	<string>WorkoutRandomizer reads your heart rate, active calories, workouts, age (date of birth) and resting heart rate from Apple Health to show live stats during your workout and to set your heart-rate zones.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>WorkoutRandomizer for Watch saves your workout session to Health.</string>
+	<string>WorkoutRandomizer saves your completed workouts to Apple Health so your activity, calories and heart rate are recorded.</string>
 	<key>UIBackgroundModes</key>
 	<array/>
 	<key>WKBackgroundModes</key>

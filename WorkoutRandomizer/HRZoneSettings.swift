@@ -36,6 +36,20 @@ final class HRZoneSettings {
 
     private(set) var healthAgeStatus: HealthAgeStatus = .notRequested
     private(set) var restingHeartRate: Double?
+    /// Where the user stands with the Health sheet for the app's full type list.
+    enum HealthRequestState: Equatable {
+        /// Not checked yet, or Health couldn't say (it can take a moment right after a fresh
+        /// install). Show neither "Connect" nor "connected".
+        case unknown
+        /// The system would still show the sheet — the user hasn't answered.
+        case pending
+        /// Answered, whichever way. Changing it later happens in the Health app.
+        case answered
+    }
+    private(set) var healthRequestState: HealthRequestState = .unknown
+    /// True while the Health sheet is still waiting on the user. Drives the "Connect Apple
+    /// Health" rows.
+    var healthRequestPending: Bool { healthRequestState == .pending }
 
     // Real stored properties, not computed pass-throughs to UserDefaults: @Observable only
     // instruments actual stored properties, so a pure get/set-over-UserDefaults property would
@@ -170,22 +184,75 @@ final class HRZoneSettings {
     }
 
 #if canImport(HealthKit)
-    /// Requests read access to date of birth (and, opportunistically, resting heart rate) and
-    /// updates `healthAgeStatus`/`restingHeartRate`. Safe to call repeatedly — HealthKit only
-    /// prompts the user the first time a given type is requested.
-    func refreshFromHealthKit() async {
+    /// Set while the Health sheet is up, so overlapping callers share one request.
+    private var healthRequestTask: Task<Void, Never>?
+
+    /// Asks for the app's whole Health list (`HealthAccess`) in one request, then reloads. This is
+    /// the only place the iPhone shows the Health sheet.
+    func requestHealthAccess() async {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        if let healthRequestTask {
+            await healthRequestTask.value
+            return
+        }
+        let task = Task { @MainActor in
+            _ = try? await HealthAccess.request(from: HKHealthStore())
+        }
+        healthRequestTask = task
+        await task.value
+        healthRequestTask = nil
+        await refreshFromHealthKit()
+    }
+
+    /// Shows the Health sheet only if the user hasn't answered it yet. Call before anything that
+    /// can wake the Watch, so the iPhone is always where the question is asked first.
+    func requestHealthAccessIfNeeded() async {
+        await refreshHealthRequestStatus()
+        // Also covers "unknown": requesting when the user has already answered shows nothing.
+        if healthRequestState != .answered { await requestHealthAccess() }
+    }
+
+    /// Re-reads whether the Health sheet is still pending. Never prompts. Health can answer
+    /// "unknown" for a moment right after install, so retry briefly before giving up.
+    func refreshHealthRequestStatus() async {
         guard HKHealthStore.isHealthDataAvailable() else {
-            healthAgeStatus = .unavailable
+            healthRequestState = .answered
             return
         }
         let store = HKHealthStore()
-        guard let dobType = HKObjectType.characteristicType(forIdentifier: .dateOfBirth) else {
+        for attempt in 0..<5 {
+            switch await HealthAccess.requestStatus(for: store) {
+            case .shouldRequest:
+                healthRequestState = .pending
+                return
+            case .unnecessary:
+                healthRequestState = .answered
+                return
+            default:
+                healthRequestState = .unknown
+                if attempt < 4 { try? await Task.sleep(for: .seconds(1)) }
+            }
+        }
+    }
+
+    /// Reads date of birth and resting heart rate and updates `healthAgeStatus` /
+    /// `restingHeartRate`. Read-only: it never shows the Health sheet (see `requestHealthAccess`),
+    /// so it's safe to call whenever a screen appears.
+    func refreshFromHealthKit() async {
+        guard HKHealthStore.isHealthDataAvailable() else {
             healthAgeStatus = .unavailable
+            healthRequestState = .answered
             return
         }
+        await refreshHealthRequestStatus()
+        // Nothing to read until the user has answered; leave the age as "not requested".
+        guard healthRequestState == .answered else {
+            healthAgeStatus = .notRequested
+            return
+        }
+        let store = HKHealthStore()
 
         do {
-            try await store.requestAuthorization(toShare: [], read: [dobType])
             let components = try store.dateOfBirthComponents()
             if let year = components.year {
                 // Subtracting years alone counts anyone who hasn't had this year's birthday yet
@@ -215,9 +282,7 @@ final class HRZoneSettings {
     }
 
     private func refreshRestingHeartRate(store: HKHealthStore) async {
-        guard let type = HKObjectType.quantityType(forIdentifier: .restingHeartRate) else { return }
-        guard (try? await store.requestAuthorization(toShare: [], read: [type])) != nil else { return }
-
+        let type = HKQuantityType(.restingHeartRate)
         let sort = SortDescriptor(\HKQuantitySample.endDate, order: .reverse)
         let descriptor = HKSampleQueryDescriptor(predicates: [.quantitySample(type: type)], sortDescriptors: [sort], limit: 1)
         guard let sample = try? await descriptor.result(for: store).first else { return }

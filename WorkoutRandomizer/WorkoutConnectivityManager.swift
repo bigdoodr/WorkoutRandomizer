@@ -75,6 +75,20 @@ class WorkoutConnectivityManager: ObservableObject {
     /// both devices classify zones identically.
     @Published var watchZoneThresholds: [Double] = []
 
+    /// A newer clock anchor that came from the Watch (its Pause / Resume / Skip). The active player
+    /// observes this and moves itself to match; the manager has already stored it as the latest.
+    @Published var incomingWatchAnchor: ClockAnchor?
+
+    /// The plan the active player is running, with the latest anchor for it. Mirrored into the
+    /// application context so a Watch that wakes up late still gets it.
+    private(set) var latestPlanSync: PlanSync?
+
+    /// A Watch workout is running and the Watch can be reached — the only time its live metrics
+    /// mean anything. Paired-but-idle, out of range, or "No active workout" all read as false.
+    var hasLiveWatchSession: Bool {
+        isWatchConnected && isWatchReachable && isWatchWorkoutActive
+    }
+
     private let session: WCSession? = WCSession.isSupported() ? WCSession.default : nil
 
     /// The most recent completion payload for the current session. Carried inside
@@ -129,10 +143,15 @@ class WorkoutConnectivityManager: ObservableObject {
         guard let session = session else { return }
         do {
             let data = try JSONEncoder().encode(state)
-            let context: [String: Any] = [
+            var context: [String: Any] = [
                 "workoutStatePayload": data,
                 "sentAt": Date().timeIntervalSince1970
             ]
+            // The plan and its latest anchor ride along, so a Watch that wakes mid-workout can
+            // derive the current exercise from them rather than wait for the next snapshot.
+            if let latestPlanSync, let planData = try? JSONEncoder().encode(latestPlanSync) {
+                context["planSyncPayload"] = planData
+            }
             try session.updateApplicationContext(context)
         } catch {
             print("Failed to send workout state via context: \(error.localizedDescription)")
@@ -192,6 +211,8 @@ class WorkoutConnectivityManager: ObservableObject {
         guard let session = session else { return }
 
         if control == .workoutStopped {
+            isWatchWorkoutActive = false
+            endPlan()
             markSessionEndedInContext()
         }
 
@@ -214,6 +235,7 @@ class WorkoutConnectivityManager: ObservableObject {
             "completedAt": sentAt   // stable identity for de-duplication
         ]
         pendingCompletionPayload = payload
+        endPlan()
 
         // Deliver the completion via the application context so it reaches the
         // watch even when it isn't reachable right now (e.g. wrist down during a
@@ -240,6 +262,62 @@ class WorkoutConnectivityManager: ObservableObject {
             "sentAt": sentAt
         ]
         session.sendMessage(message, replyHandler: nil)
+    }
+
+    // MARK: - Plan and clock anchor
+
+    /// Starts a plan: the whole routine plus the anchor it starts from. Sent live when the Watch
+    /// is reachable and always mirrored into the application context.
+    func beginPlan(_ sync: PlanSync) {
+        latestPlanSync = sync
+        incomingWatchAnchor = nil
+        pushPlanSync()
+    }
+
+    /// A new anchor from this phone (start, pause, resume, skip). Dropped if it isn't newer than
+    /// the one we already hold for the plan.
+    func sendAnchor(_ anchor: ClockAnchor) {
+        guard var sync = latestPlanSync, anchor.planID == sync.plan.id, anchor.supersedes(sync.anchor) else { return }
+        sync.anchor = anchor
+        latestPlanSync = sync
+        mirrorPlanInContext()
+        guard let session = session, session.isReachable, let data = try? JSONEncoder().encode(anchor) else { return }
+        session.sendMessage(["type": "anchor", "payload": data, "sentAt": anchor.updatedAt], replyHandler: nil) { error in
+            print("Failed to send anchor: \(error.localizedDescription)")
+        }
+    }
+
+    /// The workout is over (stopped or finished): the plan is no longer anyone's to follow.
+    func endPlan() {
+        latestPlanSync = nil
+        incomingWatchAnchor = nil
+    }
+
+    /// An anchor the Watch made. Accepted only if it belongs to the current plan and is newer.
+    func receiveAnchorFromWatch(_ anchor: ClockAnchor) {
+        guard var sync = latestPlanSync, anchor.planID == sync.plan.id, anchor.supersedes(sync.anchor) else { return }
+        sync.anchor = anchor
+        latestPlanSync = sync
+        incomingWatchAnchor = anchor
+        mirrorPlanInContext()
+    }
+
+    private func pushPlanSync() {
+        mirrorPlanInContext()
+        guard let session = session, session.isReachable, let sync = latestPlanSync,
+              let data = try? JSONEncoder().encode(sync) else { return }
+        session.sendMessage(["type": "planSync", "payload": data, "sentAt": Date().timeIntervalSince1970], replyHandler: nil) { error in
+            print("Failed to send plan: \(error.localizedDescription)")
+        }
+    }
+
+    /// Keeps the application context's copy of the plan current without disturbing the rest of it.
+    private func mirrorPlanInContext() {
+        guard let session = session, let sync = latestPlanSync, let planData = try? JSONEncoder().encode(sync) else { return }
+        var context = session.applicationContext
+        context["planSyncPayload"] = planData
+        context["sentAt"] = Date().timeIntervalSince1970
+        try? session.updateApplicationContext(context)
     }
 
     // MARK: - Watch handoff
@@ -337,6 +415,13 @@ private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
             Task { @MainActor in
                 WorkoutConnectivityManager.shared.watchRequestedStop = true
             }
+        case "anchor":
+            if let data = message["payload"] as? Data,
+               let anchor = try? JSONDecoder().decode(ClockAnchor.self, from: data) {
+                Task { @MainActor in
+                    WorkoutConnectivityManager.shared.receiveAnchorFromWatch(anchor)
+                }
+            }
         case "requestPause":
             Task { @MainActor in
                 WorkoutConnectivityManager.shared.watchRequestedPause = true
@@ -365,6 +450,16 @@ private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
             }
         default:
             break
+        }
+    }
+
+    // The Watch mirrors its latest anchor here too, so a Pause or Skip made while the phone wasn't
+    // reachable still arrives once it is.
+    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String : Any]) {
+        guard let data = applicationContext["anchorPayload"] as? Data,
+              let anchor = try? JSONDecoder().decode(ClockAnchor.self, from: data) else { return }
+        Task { @MainActor in
+            WorkoutConnectivityManager.shared.receiveAnchorFromWatch(anchor)
         }
     }
 
