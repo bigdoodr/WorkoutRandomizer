@@ -43,6 +43,11 @@ struct WorkoutPlayerView: View {
     @State private var isPlaying = false
     @State private var isPaused = false
     @State private var timer: Timer?
+    /// The routine as a plan and where it stands on the clock. The countdown is *derived* from
+    /// these (same `PlanClock` math as the Apple Watch) rather than counted down tick by tick, so
+    /// a stalled or late timer can't make this player drift from the Watch.
+    @State private var plan: WorkoutPlan?
+    @State private var anchor: ClockAnchor?
     /// Non-nil while the auto-start countdown ("Get Ready… 3-2-1") is showing
     @State private var startCountdown: Int? = nil
 
@@ -133,9 +138,41 @@ struct WorkoutPlayerView: View {
     // Split out of `body` so the same pieces can sit in one column (portrait, compact) or in two
     // (landscape on a regular-width display such as the Duo's inner screen).
 
-    /// The demo video (or its placeholder) at a given height.
+    /// The video area: the demo video with the live Watch numbers in its corner, or — on a rest
+    /// screen (no video) — the numbers standing in for it.
     @ViewBuilder
     private func videoBlock(height videoHeight: CGFloat) -> some View {
+        #if os(iOS)
+        if connectivityManager.hasLiveWatchSession {
+            let zone = ZoneResolver.resolve(heartRate: connectivityManager.heartRate,
+                                            watchZoneIndex: connectivityManager.watchZoneIndex,
+                                            liveThresholds: connectivityManager.watchZoneThresholds)
+            let noVideoShown = isRest || VideoMode(rawValue: videoManager.videoMode) == Optional.none
+            if noVideoShown {
+                WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: zone,
+                                    calories: connectivityManager.activeCalories,
+                                    elapsedSeconds: totalExerciseTime + totalRestTime, style: .panel)
+                    .frame(height: videoHeight)
+            } else {
+                videoContent(height: videoHeight)
+                    .overlay(alignment: .topLeading) {
+                        WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: zone,
+                                            calories: connectivityManager.activeCalories,
+                                            elapsedSeconds: totalExerciseTime + totalRestTime, style: .corner)
+                            .padding(8)
+                    }
+            }
+        } else {
+            videoContent(height: videoHeight)
+        }
+        #else
+        videoContent(height: videoHeight)
+        #endif
+    }
+
+    /// The demo video (or its placeholder) at a given height.
+    @ViewBuilder
+    private func videoContent(height videoHeight: CGFloat) -> some View {
         if VideoMode(rawValue: videoManager.videoMode) != Optional.none {
             if let player = avPlayer {
                 #if os(macOS)
@@ -217,7 +254,8 @@ struct WorkoutPlayerView: View {
                 heartRate: connectivityManager.heartRate,
                 hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
                 intention: intention,
-                zoneThresholds: connectivityManager.watchZoneThresholds
+                zoneThresholds: connectivityManager.watchZoneThresholds,
+                watchZoneIndex: connectivityManager.watchZoneIndex
             )
             .padding(.top, 4)
             #else
@@ -229,7 +267,9 @@ struct WorkoutPlayerView: View {
         // Apple Watch metrics while a Watch workout is live; a one-line hint otherwise
         #if os(iOS)
         if isPlaying {
-            WatchMetricsSection(connectivityManager: connectivityManager)
+            // The video overlay carries the live numbers, so the full panel is dropped; this
+            // is just the hint when no Watch workout is running.
+            WatchMetricsSection(connectivityManager: connectivityManager, showsPanelWhenLive: false)
                 .padding(.top, 4)
         }
         #endif
@@ -268,6 +308,15 @@ struct WorkoutPlayerView: View {
     private func controlsBar(buttonSize: CGFloat, iconSize: CGFloat, verticalPadding: CGFloat) -> some View {
 
                             VStack(spacing: 6) {
+        // The intention nudge lives here, above the controls, so it never covers the video.
+        if let banner = intentionBanner {
+            IntentionBannerView(payload: banner, intentionColor: intention.bannerColor)
+                .transition(.asymmetric(
+                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                    removal: .opacity
+                ))
+                .padding(.horizontal, 12)
+        }
         #if os(iOS)
                             if !isPlaying {
                                 let watchMsg: String = {
@@ -420,17 +469,6 @@ struct WorkoutPlayerView: View {
                 Button("Keep Going", role: .cancel) { }
             } message: {
                 Text("Your progress won't be saved to the recap.")
-            }
-            .overlay(alignment: .top) {
-                if let banner = intentionBanner {
-                    IntentionBannerView(payload: banner, intentionColor: intention.bannerColor)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .top).combined(with: .scale(scale: 0.7, anchor: .top)).combined(with: .opacity),
-                            removal: .move(edge: .top).combined(with: .opacity)
-                        ))
-                        .padding(.top, 8)
-                        .padding(.horizontal, 16)
-                }
             }
             .animation(.spring(response: 0.45, dampingFraction: 0.58), value: intentionBanner)
 #if os(macOS)
@@ -856,9 +894,11 @@ struct WorkoutPlayerView: View {
         DispatchQueue.main.async {
             self.playFeedback(.start)
             self.prepareVideoForCurrentExercise(autoplay: true)
-            self.beginPlanSync()
             self.sendWorkoutStateToWatch()
             self.launchWatchWorkoutSession()
+            // Stamp the anchor last, immediately before the clock starts, so "slot 0, 0 s in"
+            // is the moment the first exercise actually begins here.
+            self.beginPlanSync()
             self.startTimer()
         }
     }
@@ -868,19 +908,24 @@ struct WorkoutPlayerView: View {
     /// Sends the Watch the whole routine and where we are in it, so it can work out the current
     /// exercise from its own clock instead of waiting on a message per transition.
     private func beginPlanSync() {
-        #if os(iOS)
         let now = Date().timeIntervalSince1970
         let slots = routine.indices.map { index in
             PlanSlot(name: routine[index].name,
                      isRest: routine[index].name == "Rest",
                      duration: timing.duration(at: index, in: routine))
         }
-        let plan = WorkoutPlan(id: UUID().uuidString, createdAt: now, slots: slots,
-                               activityTypeRaw: resolvedActivityType.rawValue)
-        let anchor = PlanClock.anchor(planID: plan.id, slotIndex: currentIndex,
-                                      secondsIntoSlot: secondsIntoCurrentSlot,
-                                      isRunning: !isPaused, now: now, source: .phone)
-        connectivityManager.beginPlan(PlanSync(plan: plan, anchor: anchor))
+        #if canImport(HealthKit)
+        let activityTypeRaw: UInt? = resolvedActivityType.rawValue
+        #else
+        let activityTypeRaw: UInt? = nil
+        #endif
+        let newPlan = WorkoutPlan(id: UUID().uuidString, createdAt: now, slots: slots, activityTypeRaw: activityTypeRaw)
+        let start = PlanClock.anchor(planID: newPlan.id, slotIndex: currentIndex, secondsIntoSlot: 0,
+                                     isRunning: !isPaused, now: now, source: .phone)
+        plan = newPlan
+        anchor = start
+        #if os(iOS)
+        connectivityManager.beginPlan(PlanSync(plan: newPlan, anchor: start))
         #endif
     }
 
@@ -889,15 +934,13 @@ struct WorkoutPlayerView: View {
         Double(max(0, durationForCurrentPosition - timeRemaining))
     }
 
-    /// Tells the Watch where we are now. Called on Pause / Resume / Skip — the moments the Watch
-    /// can't work out for itself. (Ordinary transitions need no message: the Watch derives them.)
+    /// Tells the Watch about the anchor we just made. Called on Pause / Resume / Skip — the
+    /// moments the Watch can't work out for itself. (Ordinary transitions need no message: the
+    /// Watch derives them from the plan.)
     private func sendPhoneAnchor() {
         #if os(iOS)
-        guard let planID = connectivityManager.latestPlanSync?.plan.id, currentIndex < routine.count else { return }
-        connectivityManager.sendAnchor(
-            PlanClock.anchor(planID: planID, slotIndex: currentIndex, secondsIntoSlot: secondsIntoCurrentSlot,
-                             isRunning: !isPaused, now: Date().timeIntervalSince1970, source: .phone)
-        )
+        guard let anchor else { return }
+        connectivityManager.sendAnchor(anchor)
         #endif
     }
 
@@ -905,9 +948,10 @@ struct WorkoutPlayerView: View {
     /// match. Applied without sending an anchor back, so the two can't echo.
     private func applyWatchAnchor(_ anchor: ClockAnchor?) {
         #if os(iOS)
-        guard let anchor, isPlaying,
-              let sync = connectivityManager.latestPlanSync, sync.plan.id == anchor.planID else { return }
-        let position = PlanClock.position(plan: sync.plan, anchor: anchor, at: Date().timeIntervalSince1970)
+        guard let incoming = anchor, isPlaying, let plan, plan.id == incoming.planID else { return }
+        // Adopt it as our own clock reference, then move the display to match.
+        self.anchor = incoming
+        let position = PlanClock.position(plan: plan, anchor: incoming, at: Date().timeIntervalSince1970)
 
         func recordCurrentAsDone() {
             if let ex = currentExercise, ex.name != "Rest" { completedExerciseNames.append(ex.name) }
@@ -930,10 +974,10 @@ struct WorkoutPlayerView: View {
         }
         timeRemaining = position.remaining
         if moved {
-            prepareVideoForCurrentExercise(autoplay: anchor.isRunning)
+            prepareVideoForCurrentExercise(autoplay: incoming.isRunning)
             playFeedback(transitionFeedback(enteringIndex: currentIndex))
         }
-        let shouldPause = !anchor.isRunning
+        let shouldPause = !incoming.isRunning
         if isPaused != shouldPause {
             isPaused = shouldPause
             if isPaused { avPlayer?.pause() } else { avPlayer?.play() }
@@ -993,61 +1037,83 @@ struct WorkoutPlayerView: View {
         #endif
     }
     
+    /// Starts the clock. The timer only *prompts* a look at the time: what the player shows comes
+    /// from the plan and anchor (`clockTick`), so a late or paused tick costs nothing. It runs in
+    /// the common run-loop modes so it keeps firing while the user scrolls the player.
     private func startTimer() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            guard !isPaused else { return }
+        let newTimer = Timer(timeInterval: 0.25, repeats: true) { _ in
+            clockTick()
+        }
+        RunLoop.main.add(newTimer, forMode: .common)
+        timer = newTimer
+    }
 
-            timeRemaining -= 1
+    /// Works out where the plan stands now and brings the player in line: advances through any
+    /// slots the clock has passed, then sets the countdown from `PlanClock` — the same math, and
+    /// the same rounding (whole seconds, rounded up), as the Apple Watch.
+    private func clockTick() {
+        guard isPlaying, !isPaused, let plan, let anchor else { return }
+        let position = PlanClock.position(plan: plan, anchor: anchor, at: Date().timeIntervalSince1970)
+        let previousRemaining = timeRemaining
 
-            // Track exercise vs rest time
-            if isRest {
-                totalRestTime += 1
-            } else {
-                totalExerciseTime += 1
-            }
+        // Leave any slot the clock has already moved past (usually one; more after a long stall).
+        let target = min(position.slotIndex, routine.count)
+        while currentIndex < target {
+            countSeconds(timeRemaining)          // what was left of the slot we're leaving
+            playFeedback(.end)
+            nextExercise()                       // next slot, or the end of the routine
+            if currentIndex >= routine.count { return }
+        }
+        guard currentIndex < routine.count else { return }
 
-            // Sample heart rate for recap stats + send timer update to watch every second.
-            // Both touch the MainActor-isolated connectivityManager, so they're hopped
-            // together in one Task to avoid referencing its main-actor-isolated
-            // properties from the Sendable Timer closure directly.
-            #if os(iOS)
-            let currentTime = timeRemaining
-            let currentExerciseTime = totalExerciseTime
-            Task { @MainActor in
-                let hr = connectivityManager.heartRate
-                if hr > 0 {
-                    heartRateSamples.append(hr)
-                    if hr > peakHeartRate { peakHeartRate = hr }
-                    // Check HR/intention alignment every 30 seconds during exercise
-                    if !isRest && currentExerciseTime > 0
-                        && currentExerciseTime % 30 == 0
-                        && currentExerciseTime != lastBannerExerciseTime {
-                        lastBannerExerciseTime = currentExerciseTime
-                        let zone = hrZoneName(bpm: hr)
-                        if zone == "Zone 4" || zone == "Zone 5" {
-                            highIntensityStreakSeconds += 30
-                        } else {
-                            highIntensityStreakSeconds = 0
-                        }
-                        showIntentionBannerIfNeeded(hr: hr)
-                    }
-                }
-                connectivityManager.sendTimerUpdate(timeRemaining: currentTime)
-            }
-            #endif
-
-            if timeRemaining == 3 {
-                playFeedback(.warning)
-            }
-
-            if timeRemaining <= 0 {
-                playFeedback(.end)
-                nextExercise()
-            }
+        let remaining = position.remaining
+        if remaining < timeRemaining {
+            countSeconds(timeRemaining - remaining)
+            timeRemaining = remaining
+            secondElapsed(remaining: remaining)
+        } else if remaining != timeRemaining {
+            timeRemaining = remaining            // the clock reference moved (e.g. a Watch skip)
+        }
+        if remaining == 3 && previousRemaining != 3 {
+            playFeedback(.warning)
         }
     }
-    
+
+    /// Adds whole seconds to the exercise or rest total for the slot we're in.
+    private func countSeconds(_ seconds: Int) {
+        guard seconds > 0, currentIndex < routine.count else { return }
+        if isRest { totalRestTime += seconds } else { totalExerciseTime += seconds }
+    }
+
+    /// Per-second work: heart-rate sampling for the recap, the intention banner check, and the
+    /// timer message older Watch builds still use (new ones derive time from the plan).
+    private func secondElapsed(remaining: Int) {
+        #if os(iOS)
+        let currentExerciseTime = totalExerciseTime
+        Task { @MainActor in
+            let hr = connectivityManager.heartRate
+            if hr > 0 {
+                heartRateSamples.append(hr)
+                if hr > peakHeartRate { peakHeartRate = hr }
+                // Check HR/intention alignment every 30 seconds of exercise.
+                if !isRest && currentExerciseTime >= 30
+                    && currentExerciseTime / 30 > max(lastBannerExerciseTime, 0) / 30 {
+                    lastBannerExerciseTime = currentExerciseTime
+                    let zone = hrZoneName(bpm: hr)
+                    if zone == "Zone 4" || zone == "Zone 5" {
+                        highIntensityStreakSeconds += 30
+                    } else {
+                        highIntensityStreakSeconds = 0
+                    }
+                    showIntentionBannerIfNeeded(hr: hr)
+                }
+            }
+            connectivityManager.sendTimerUpdate(timeRemaining: remaining)
+        }
+        #endif
+    }
+
     private func nextExercise() {
         // Record the completed exercise before advancing
         if let ex = currentExercise, ex.name != "Rest" {
@@ -1095,6 +1161,12 @@ struct WorkoutPlayerView: View {
     private func togglePause() {
         isPaused.toggle()
         playFeedback(.warning)
+        if let plan, let current = anchor {
+            let now = Date().timeIntervalSince1970
+            anchor = isPaused
+                ? PlanClock.paused(plan, current, at: now, by: .phone)
+                : PlanClock.resumed(plan, current, at: now, by: .phone)
+        }
         sendPhoneAnchor()
         sendWorkoutStateToWatch()
         #if os(iOS)
@@ -1105,10 +1177,14 @@ struct WorkoutPlayerView: View {
     
     private func skipExercise() {
         playFeedback(.warning)
+        // The skip moves the clock reference to the start of the next slot.
+        if let plan, let current = anchor {
+            anchor = PlanClock.skipped(plan, current, at: Date().timeIntervalSince1970, by: .phone)
+        }
         nextExercise()
-        // A skip is a jump the Watch can't derive; tell it where we landed (unless that was the
-        // end — the completion message covers that).
-        sendPhoneAnchor()
+        // A skip is a jump the Watch can't derive; tell it where we landed. (If that was the end,
+        // the completion message covers it.)
+        if currentIndex < routine.count { sendPhoneAnchor() }
     }
     
     private func stopWorkout() {
@@ -1133,13 +1209,13 @@ struct WorkoutPlayerView: View {
 
     private func hrZoneName(bpm: Double) -> String {
         #if os(iOS)
-        let thresholds = connectivityManager.watchZoneThresholds
-        if !thresholds.isEmpty {
-            let idx = thresholds.firstIndex(where: { bpm < $0 }) ?? thresholds.count
-            return "Zone \(idx + 1)"
-        }
-        #endif
+        // The Watch's own zone first, then its boundaries, and only then the age-based fallback.
+        return ZoneResolver.resolve(heartRate: bpm,
+                                    watchZoneIndex: connectivityManager.watchZoneIndex,
+                                    liveThresholds: connectivityManager.watchZoneThresholds).name
+        #else
         return HRZoneSettings.shared.zoneName(forHeartRate: bpm)
+        #endif
     }
 
     // Zones 4-5 are meant for short bursts (per standard HR zone guidance: Zone 5 is

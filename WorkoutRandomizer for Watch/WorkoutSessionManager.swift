@@ -20,6 +20,9 @@ class WorkoutSessionManager: NSObject, ObservableObject {
     @Published var activeCalories: Double = 0
     @Published var peakHeartRate: Double = 0
     @Published var currentZoneIndex: Int? = nil
+    /// True once HealthKit has told us the zone itself (didUpdateWorkoutZone). From then on that
+    /// is the authority and the manual classification against thresholds below stands down.
+    private var systemZoneReported = false
 
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
@@ -227,6 +230,7 @@ class WorkoutSessionManager: NSObject, ObservableObject {
             self.peakHeartRate = 0
             self.currentZoneIndex = nil
             self.zoneThresholds = []
+            self.systemZoneReported = false
         }
     }
 
@@ -298,7 +302,7 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
                         if self.heartRate > self.peakHeartRate {
                             self.peakHeartRate = self.heartRate
                         }
-                        if !self.zoneThresholds.isEmpty, self.heartRate > 0 {
+                        if !self.systemZoneReported, !self.zoneThresholds.isEmpty, self.heartRate > 0 {
                             let newZone = self.zoneThresholds.firstIndex(where: { self.heartRate < $0 }) ?? self.zoneThresholds.count
                             if newZone != self.currentZoneIndex {
                                 self.currentZoneIndex = newZone
@@ -323,6 +327,29 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
         // Handle workout events if needed
     }
 
+    /// HealthKit's own word on which zone the wearer is in, whatever zone configuration is in
+    /// force (the wearer's Health settings, or the fallback this app installs). This is the zone
+    /// the iPhone shows, so both devices always agree.
+    @available(watchOS 27.0, *)
+    func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didUpdateWorkoutZone zoneUpdate: HKLiveWorkoutZoneUpdate) {
+        let bpm = HKUnit.count().unitDivided(by: .minute())
+        let index = zoneUpdate.currentZoneDuration?.zone.index
+        // The boundaries in force come from the builder's heart-rate zone group.
+        let thresholds = workoutBuilder.zoneGroup(for: HKQuantityType(.heartRate))?
+            .configuration.zones.compactMap { $0.maximum?.doubleValue(for: bpm) } ?? []
+        DispatchQueue.main.async {
+            self.systemZoneReported = true
+            if let index, index != self.currentZoneIndex {
+                self.currentZoneIndex = index
+                WKInterfaceDevice.current().play(.notification)
+            }
+            if !thresholds.isEmpty, thresholds != self.zoneThresholds {
+                self.zoneThresholds = thresholds
+            }
+            self.sendHealthMetricsToPhone()
+        }
+    }
+
     // MARK: - Send Health Metrics to iPhone
     
     private func sendHealthMetricsToPhone() {
@@ -331,10 +358,14 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
         guard session.isReachable else { return }
         
         // Create metrics payload
+        // The zone and its boundaries ride along with every sample, so the iPhone has them even
+        // if the one-off thresholds message at session start was missed.
         let metrics: [String: Any] = [
             "heartRate": heartRate,
             "activeCalories": activeCalories,
-            "isWorkoutActive": isWorkoutActive
+            "isWorkoutActive": isWorkoutActive,
+            "zoneIndex": currentZoneIndex ?? -1,
+            "zoneThresholds": zoneThresholds
         ]
         
         // Encode to data

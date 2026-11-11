@@ -28,26 +28,21 @@ struct WorkoutLiveStatsView: View {
     let hasWatchData: Bool
     let intention: WorkoutIntention
     var zoneThresholds: [Double] = []
+    /// The zone the Apple Watch itself reported, when it has. Takes precedence over anything
+    /// worked out here, so the zone and Burn Type match the wrist.
+    var watchZoneIndex: Int? = nil
 
     @State private var showingZonePopover = false
     private var hrZones = HRZoneSettings.shared
 
-    /// The watch's own thresholds when a session has supplied them, else the shared
-    /// Settings-derived fallback (age-based, or a manual override).
+    /// Boundaries for the BPM ranges in the popover: the Watch's, else the age-based fallback.
     private var effectiveThresholds: [Double] {
-        zoneThresholds.isEmpty ? hrZones.zoneBoundaries : zoneThresholds
+        ZoneResolver.boundaries(liveThresholds: zoneThresholds)
     }
 
     private var hrInfo: (zone: String, color: Color, nutrient: String) {
-        let t = effectiveThresholds
-        let idx = t.firstIndex(where: { heartRate < $0 }) ?? t.count
-        switch idx {
-        case 0: return ("Zone 1", .green, "Active Recovery")
-        case 1: return ("Zone 2", .yellow, "Fat Burn")
-        case 2: return ("Zone 3", .orange, "Mixed")
-        case 3: return ("Zone 4", .red, "Carb Burn")
-        default: return ("Zone 5", .purple, "Peak Effort")
-        }
+        let info = ZoneResolver.resolve(heartRate: heartRate, watchZoneIndex: watchZoneIndex, liveThresholds: zoneThresholds)
+        return (info.name, info.color, info.burnType)
     }
 
     private func zoneBPMRange(index: Int) -> String {

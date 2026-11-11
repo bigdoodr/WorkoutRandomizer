@@ -1172,7 +1172,8 @@ struct SavedRoutinePlayerView: View {
                                 heartRate: connectivityManager.heartRate,
                                 hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
                                 intention: intention,
-                                zoneThresholds: connectivityManager.watchZoneThresholds
+                                zoneThresholds: connectivityManager.watchZoneThresholds,
+                                watchZoneIndex: connectivityManager.watchZoneIndex
                             )
                             .padding(.top, 4)
                             #else

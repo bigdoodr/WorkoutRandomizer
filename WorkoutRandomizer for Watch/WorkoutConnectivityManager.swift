@@ -7,6 +7,7 @@ import Foundation
 import UserNotifications
 import WatchConnectivity
 import WatchKit
+import os
 
 // MARK: - watchOS-specific WorkoutConnectivityManager
 
@@ -48,6 +49,62 @@ class WorkoutConnectivityManager: NSObject, ObservableObject {
     /// The plan has run out of slots but the iPhone hasn't confirmed the workout is over yet.
     @Published var isFinishing = false
     private var planTicker: Timer?
+
+    // MARK: Clock offset
+    // Plan and anchor times are in the iPhone's clock. The two devices' clocks can differ by a
+    // second or two, which would make this side count down early or late by that much. A
+    // round-trip ping measures it: ask the phone for its clock, and compare against the midpoint
+    // of the round trip. Delivery latency cancels out (it would otherwise look like skew); what's
+    // left is at most half the round trip, so a difference is only acted on once it clearly
+    // exceeds that.
+    private static let timingLog = Logger(subsystem: "rocks.scruggsfam.productions.WorkoutRandomizer", category: "Timing")
+    private struct ClockSample { let offset: TimeInterval; let roundTrip: TimeInterval }
+    private var clockSamples: [ClockSample] = []
+    private var lastClockPingAt: Date = .distantPast
+    /// Watch clock minus iPhone clock, in seconds. Zero until a measurement shows a real difference.
+    private(set) var clockOffset: TimeInterval = 0
+
+    /// "Now" in the iPhone's clock.
+    private func phoneNow() -> TimeInterval {
+        Date().timeIntervalSince1970 - clockOffset
+    }
+
+    /// One round-trip measurement. Needs the phone reachable; quietly does nothing otherwise.
+    private func pingPhoneClock() {
+        lastClockPingAt = Date()
+        guard let session, session.isReachable else { return }
+        let sentAt = Date().timeIntervalSince1970
+        session.sendMessage(["type": "clockPing"], replyHandler: { [weak self] reply in
+            let receivedAt = Date().timeIntervalSince1970
+            guard let phoneTime = reply["phoneTime"] as? TimeInterval else { return }
+            DispatchQueue.main.async {
+                self?.recordClockSample(sentAt: sentAt, phoneTime: phoneTime, receivedAt: receivedAt)
+            }
+        }, errorHandler: nil)
+    }
+
+    /// A short burst when a plan starts (so the first exercise is right), then one now and then.
+    private func pingPhoneClockBurst() {
+        for i in 0..<4 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4 * Double(i)) { [weak self] in
+                self?.pingPhoneClock()
+            }
+        }
+    }
+
+    private func recordClockSample(sentAt: TimeInterval, phoneTime: TimeInterval, receivedAt: TimeInterval) {
+        let roundTrip = receivedAt - sentAt
+        guard roundTrip > 0, roundTrip < 5 else { return }
+        clockSamples.append(ClockSample(offset: (sentAt + receivedAt) / 2 - phoneTime, roundTrip: roundTrip))
+        if clockSamples.count > 8 { clockSamples.removeFirst() }
+        // The quickest round trip is the most trustworthy.
+        guard let best = clockSamples.min(by: { $0.roundTrip < $1.roundTrip }) else { return }
+        let applied = abs(best.offset) > best.roundTrip / 2 + 0.25 ? best.offset : 0
+        Self.timingLog.notice("Clock vs iPhone: offset \(best.offset, format: .fixed(precision: 3)) s, round trip \(best.roundTrip, format: .fixed(precision: 3)) s, applied \(applied, format: .fixed(precision: 3)) s")
+        guard abs(applied - clockOffset) > 0.05 else { return }
+        clockOffset = applied
+        recomputeFromPlan()
+    }
 
     /// Whether the current exercise is being derived from a plan (true) or taken from snapshots.
     var usesPlan: Bool { plan != nil && anchor != nil }
@@ -243,6 +300,7 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
             plan = sync.plan
             anchor = sync.anchor
             isFinishing = false
+            pingPhoneClockBurst()
         } else if let plan, plan.id == sync.plan.id, let current = anchor, sync.anchor.supersedes(current) {
             anchor = sync.anchor
         } else {
@@ -271,7 +329,7 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
     /// iPhone as a new anchor; whichever side acted last wins.
     func localTogglePause() {
         guard let plan, let current = anchor else { return }
-        let now = Date().timeIntervalSince1970
+        let now = phoneNow()
         let next = current.isRunning
             ? PlanClock.paused(plan, current, at: now, by: .watch)
             : PlanClock.resumed(plan, current, at: now, by: .watch)
@@ -282,7 +340,7 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
     /// Skip from the wrist: jumps to the next slot here at once and tells the iPhone.
     func localSkip() {
         guard let plan, let current = anchor else { return }
-        let next = PlanClock.skipped(plan, current, at: Date().timeIntervalSince1970, by: .watch)
+        let next = PlanClock.skipped(plan, current, at: phoneNow(), by: .watch)
         triggerWatchFeedback(.start)
         commitLocal(next)
     }
@@ -309,7 +367,7 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
     /// out it switches to "Finishing…" and waits for the iPhone to confirm.
     private func recomputeFromPlan() {
         guard let plan, let anchor, completedSummary == nil else { return }
-        let now = Date().timeIntervalSince1970
+        let now = phoneNow()
         let position = PlanClock.position(plan: plan, anchor: anchor, at: now)
 
         if position.isFinished {
@@ -345,7 +403,7 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
         // The countdown target the view counts down to. Stable between ticks (only a real change
         // of more than half a second moves it) so the view isn't re-synced every tick.
         if anchor.isRunning {
-            let deadline = Date(timeIntervalSince1970: now + Double(position.remaining))
+            let deadline = Date(timeIntervalSinceNow: Double(position.remaining))
             if let existing = slotDeadline, abs(existing.timeIntervalSince(deadline)) < 0.6 {
                 // keep
             } else {
@@ -362,9 +420,14 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
 
     private func startPlanTicker() {
         guard planTicker == nil else { return }
-        planTicker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.recomputeFromPlan()
+        // In the common modes so it keeps running while the view is being interacted with.
+        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.recomputeFromPlan()
+            if Date().timeIntervalSince(self.lastClockPingAt) > 60 { self.pingPhoneClock() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        planTicker = timer
     }
 
     private func stopPlanTicker() {

@@ -44,6 +44,11 @@ struct WatchHealthMetrics: Codable {
     let heartRate: Double
     let activeCalories: Double
     let isWorkoutActive: Bool
+    /// The zone HealthKit says the wearer is in (zero-based); absent or negative when unknown.
+    var zoneIndex: Int? = nil
+    /// The Watch's zone boundaries, repeated with every sample so the iPhone never depends on the
+    /// single message sent at session start having arrived.
+    var zoneThresholds: [Double]? = nil
 }
 
 #if os(iOS)
@@ -74,6 +79,9 @@ class WorkoutConnectivityManager: ObservableObject {
     /// non-empty the live display uses these instead of the 220-age formula so
     /// both devices classify zones identically.
     @Published var watchZoneThresholds: [Double] = []
+    /// The zone the Apple Watch reports for the wearer right now (zero-based), or nil when it
+    /// hasn't said. The iPhone shows this in preference to anything it works out itself.
+    @Published var watchZoneIndex: Int?
 
     /// A newer clock anchor that came from the Watch (its Pause / Resume / Skip). The active player
     /// observes this and moves itself to match; the manager has already stored it as the latest.
@@ -112,7 +120,9 @@ class WorkoutConnectivityManager: ObservableObject {
         // A new/ongoing session is sending state — any previous completion is history
         pendingCompletionPayload = nil
         completedZoneDurations = []
-        watchZoneThresholds = []
+        // (The Watch's zone thresholds are deliberately NOT cleared here. This runs on every
+        // transition, pause and skip, and the Watch only sends its thresholds when the session
+        // starts — clearing them dropped the player back to age-based zones ~20 s in.)
 
         // Always mirror the latest state into the application context (timestamped).
         // This way, if the watch app wakes or relaunches mid-session it immediately
@@ -212,6 +222,7 @@ class WorkoutConnectivityManager: ObservableObject {
 
         if control == .workoutStopped {
             isWatchWorkoutActive = false
+            watchZoneIndex = nil
             endPlan()
             markSessionEndedInContext()
         }
@@ -339,6 +350,15 @@ class WorkoutConnectivityManager: ObservableObject {
             self.heartRate = metrics.heartRate
             self.activeCalories = metrics.activeCalories
             self.isWatchWorkoutActive = metrics.isWorkoutActive
+            // The Watch's zone, while its session is running.
+            if metrics.isWorkoutActive, let zone = metrics.zoneIndex, zone >= 0 {
+                if self.watchZoneIndex != zone { self.watchZoneIndex = zone }
+            } else if self.watchZoneIndex != nil {
+                self.watchZoneIndex = nil
+            }
+            if let thresholds = metrics.zoneThresholds, thresholds.count == 4, thresholds != self.watchZoneThresholds {
+                self.receiveZoneThresholds(thresholds)
+            }
         }
     }
 
@@ -393,6 +413,17 @@ private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
     }
 
     // MARK: Receive messages from Watch
+
+    /// Messages sent with a reply handler. The only one in use is the Watch's clock ping: answer
+    /// with this phone's clock so the Watch can measure the difference between the two.
+    func session(_ session: WCSession, didReceiveMessage message: [String : Any], replyHandler: @escaping ([String : Any]) -> Void) {
+        if (message["type"] as? String) == "clockPing" {
+            replyHandler(["phoneTime": Date().timeIntervalSince1970])
+        } else {
+            replyHandler([:])
+            self.session(session, didReceiveMessage: message)
+        }
+    }
 
     func session(_ session: WCSession, didReceiveMessage message: [String : Any]) {
         guard let type = message["type"] as? String else { return }

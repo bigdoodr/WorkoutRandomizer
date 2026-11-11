@@ -183,7 +183,11 @@ struct WorkoutWatchView: View {
     /// of the change. Falls back to the raw value when paired with an older phone build that
     /// doesn't send one.
     private func syncDisplayTime() {
-        if let deadline = connectivityManager.slotDeadline {
+        if connectivityManager.usesPlan {
+            // The same whole-seconds-rounded-up value the iPhone shows, from the same PlanClock
+            // math — no second rounding of a deadline here.
+            displayTime = workoutState?.timeRemaining ?? displayTime
+        } else if let deadline = connectivityManager.slotDeadline {
             displayTime = max(0, Int(deadline.timeIntervalSinceNow.rounded()))
         } else {
             displayTime = workoutState?.timeRemaining ?? 0
@@ -204,7 +208,9 @@ struct WorkoutWatchView: View {
             return
         }
         localTicker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            if let deadline = connectivityManager.slotDeadline {
+            if connectivityManager.usesPlan {
+                displayTime = workoutState?.timeRemaining ?? displayTime
+            } else if let deadline = connectivityManager.slotDeadline {
                 displayTime = max(0, Int(deadline.timeIntervalSinceNow.rounded()))
             } else if Date().timeIntervalSince(lastPhoneUpdateAt) > 1.5 {
                 displayTime = max(0, displayTime - 1)

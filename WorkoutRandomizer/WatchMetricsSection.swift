@@ -10,10 +10,15 @@ import SwiftUI
 
 struct WatchMetricsSection: View {
     @ObservedObject var connectivityManager: WorkoutConnectivityManager
+    /// Whether to show the full panel while a Watch workout is live. A player that draws the
+    /// numbers over its video turns this off and keeps only the hint.
+    var showsPanelWhenLive = true
 
     var body: some View {
         if connectivityManager.hasLiveWatchSession {
-            HealthMetricsView(connectivityManager: connectivityManager)
+            if showsPanelWhenLive {
+                HealthMetricsView(connectivityManager: connectivityManager)
+            }
         } else {
             Label("Wear Apple Watch for live heart rate", systemImage: "applewatch")
                 .font(.footnote)

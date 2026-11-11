@@ -497,3 +497,38 @@ struct PlanClockTests {
         #expect(decoded == sync)
     }
 }
+
+// MARK: - Zone resolution
+
+@MainActor
+struct ZoneResolverTests {
+
+    @Test func theWatchsOwnZoneBeatsAnythingWorkedOutHere() {
+        // 150 bpm against these boundaries would be Zone 4, but the Watch says Zone 2.
+        let info = ZoneResolver.resolve(heartRate: 150, watchZoneIndex: 1, liveThresholds: [100, 120, 140, 160])
+        #expect(info.index == 1)
+        #expect(info.name == "Zone 2")
+        #expect(info.burnType == "Fat Burn")
+    }
+
+    @Test func withoutAWatchZoneTheWatchsBoundariesClassifyTheHeartRate() {
+        let boundaries: [Double] = [100, 120, 140, 160]
+        #expect(ZoneResolver.resolve(heartRate: 90, watchZoneIndex: nil, liveThresholds: boundaries).index == 0)
+        #expect(ZoneResolver.resolve(heartRate: 130, watchZoneIndex: nil, liveThresholds: boundaries).index == 2)
+        #expect(ZoneResolver.resolve(heartRate: 150, watchZoneIndex: nil, liveThresholds: boundaries).index == 3)
+        #expect(ZoneResolver.resolve(heartRate: 175, watchZoneIndex: nil, liveThresholds: boundaries).index == 4)
+    }
+
+    @Test func burnTypeFollowsTheZone() {
+        #expect(ZoneResolver.info(forIndex: 0).burnType == "Active Recovery")
+        #expect(ZoneResolver.info(forIndex: 1).burnType == "Fat Burn")
+        #expect(ZoneResolver.info(forIndex: 2).burnType == "Mixed")
+        #expect(ZoneResolver.info(forIndex: 3).burnType == "Carb Burn")
+        #expect(ZoneResolver.info(forIndex: 4).burnType == "Peak Effort")
+    }
+
+    @Test func outOfRangeZoneIndexesAreClamped() {
+        #expect(ZoneResolver.info(forIndex: -3).index == 0)
+        #expect(ZoneResolver.info(forIndex: 9).index == 4)
+    }
+}
