@@ -453,7 +453,12 @@ struct StretchPlayerView: View {
     @State private var timeRemaining = 0
     @State private var isPlaying = false
     @State private var isPaused = false
-    @State private var timer: Timer?
+    /// The shared plan clock (same math as the Apple Watch). `roles` maps each plan slot back to
+    /// which stretch, which side, and whether it's a "Get Ready".
+    @State private var clock = PlanPlayerClock()
+    @State private var roles: [StretchSlotRole] = []
+    /// Whole-session elapsed seconds, for the live Watch overlay.
+    @State private var elapsedSeconds = 0
     @State private var showingRecap = false
     @Environment(\.dismiss) private var dismiss
 
@@ -520,10 +525,50 @@ struct StretchPlayerView: View {
             }
             .frame(height: Self.videoHeight)
             .cornerRadius(10)
+            .overlay(alignment: .topLeading) { liveMetricsCorner }
             .padding(.horizontal)
             .padding(.top, 8)
+        } else {
+            // Video is off: while a Watch workout is live the numbers take the video's place.
+            liveMetricsPanel
         }
     }
+
+    // MARK: Live Watch metrics (only while a Watch workout is running)
+
+    @ViewBuilder
+    private var liveMetricsCorner: some View {
+        #if os(iOS)
+        if isPlaying && connectivityManager.hasLiveWatchSession {
+            WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: liveZone,
+                                calories: connectivityManager.activeCalories,
+                                elapsedSeconds: elapsedSeconds, style: .corner)
+                .padding(8)
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private var liveMetricsPanel: some View {
+        #if os(iOS)
+        if isPlaying && connectivityManager.hasLiveWatchSession {
+            WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: liveZone,
+                                calories: connectivityManager.activeCalories,
+                                elapsedSeconds: elapsedSeconds, style: .panel)
+                .frame(height: Self.videoHeight)
+                .padding(.horizontal)
+                .padding(.top, 8)
+        }
+        #endif
+    }
+
+    #if os(iOS)
+    private var liveZone: WorkoutZoneInfo {
+        ZoneResolver.resolve(heartRate: connectivityManager.heartRate,
+                             watchZoneIndex: connectivityManager.watchZoneIndex,
+                             liveThresholds: connectivityManager.watchZoneThresholds)
+    }
+    #endif
 
     private var timerProgress: CGFloat {
         guard isPlaying else { return 1 }
@@ -599,6 +644,14 @@ struct StretchPlayerView: View {
                     }
                     .frame(width: 160, height: 160)
 
+                    #if os(iOS)
+                    if isPlaying {
+                        // Just the hint when no Watch workout is running; the numbers themselves
+                        // are drawn over the video.
+                        WatchMetricsSection(connectivityManager: connectivityManager, showsPanelWhenLive: false)
+                    }
+                    #endif
+
                     // Progress
                     if !stretches.isEmpty {
                         VStack(spacing: 2) {
@@ -667,6 +720,7 @@ struct StretchPlayerView: View {
 #endif
         }
         .onAppear {
+            configureClock()
             timeRemaining = holdDuration
             prepareWatchHandoff()
             prepareVideoForCurrentStretch(autoplay: isPlaying)
@@ -688,6 +742,10 @@ struct StretchPlayerView: View {
             prepareVideoForCurrentStretch(autoplay: isPlaying && !isPaused)
         }
 #if os(iOS)
+        // The Apple Watch made a newer clock anchor (its Pause / Resume / Skip) — follow it
+        .onChange(of: connectivityManager.incomingWatchAnchor) { _, anchor in
+            if let anchor { clock.adopt(anchor) }
+        }
         // The Apple Watch tapped Start — begin with a "Get Ready" lead-in
         .onChange(of: connectivityManager.watchRequestedStart) { _, requested in
             if requested {
@@ -747,69 +805,95 @@ struct StretchPlayerView: View {
         .clipShape(Circle())
     }
 
-    private func startRoutine(withLeadIn leadIn: Bool = false) {
-        isPlaying = true
-        currentSide = 0
-        if leadIn {
-            // Brief "Get Ready" countdown so the user can get into position
-            isTransitioning = true
-            timeRemaining = Self.transitionDuration
-        } else {
-            isTransitioning = false
-            timeRemaining = holdDuration
+    /// Wires the clock's callbacks to this player's state. Done once, when the player appears.
+    private func configureClock() {
+        #if os(iOS)
+        clock.link = .watch
+        #endif
+        clock.onElapsed = { _, seconds in elapsedSeconds += seconds }
+        clock.onSecond = { remaining in
+            timeRemaining = remaining
+            Task { @MainActor in connectivityManager.sendTimerUpdate(timeRemaining: remaining) }
         }
+        clock.onReset = { remaining in timeRemaining = remaining }
+        clock.onWarning = {
+            if !isTransitioning { playFeedback(.warning) }
+        }
+        clock.onSlotChange = { from, to, reason in
+            // A hold that runs out gets the end cue; "Get Ready" slots and skips don't.
+            if reason == .natural, roles.indices.contains(from), !roles[from].isTransition {
+                playFeedback(.end)
+            }
+            applyRole(to)
+            timeRemaining = clock.remaining
+            playFeedback(.start)
+            sendWorkoutStateToWatch()
+        }
+        clock.onPauseChange = { paused, byWatch in
+            isPaused = paused          // (the isPaused onChange below pauses/plays the video)
+            if byWatch { sendWorkoutStateToWatch() }
+        }
+        clock.onFinish = { last, reason in
+            finishSession(lastSlot: last, reason: reason)
+        }
+    }
+
+    /// Maps a plan slot back onto this player's stretch / side / "Get Ready" state.
+    private func applyRole(_ slot: Int) {
+        guard roles.indices.contains(slot) else { return }
+        let role = roles[slot]
+        currentIndex = role.stretchIndex
+        currentSide = role.side
+        isTransitioning = role.isTransition
+    }
+
+    private func startRoutine(withLeadIn leadIn: Bool = false) {
+        guard !stretches.isEmpty else { return }
+        // The session as a plan: Get Ready slots, holds, and both sides, all with their lengths
+        // already applied. (A session started from the Watch opens with a Get Ready lead-in.)
+        let built = StretchPlanBuilder.build(
+            items: stretches.map { StretchPlanItem(name: $0.name, singleSided: $0.singleSided) },
+            holdDuration: holdDuration,
+            bothSides: bothSidesMode,
+            transitionDuration: Self.transitionDuration,
+            leadIn: leadIn,
+            activityTypeRaw: HKWorkoutActivityType.flexibility.rawValue
+        )
+        roles = built.roles
+        isPlaying = true
+        isPaused = false
+        elapsedSeconds = 0
+        applyRole(0)
+        timeRemaining = built.plan.slots[0].duration
         setIdleTimer(disabled: true)
-        startTimer()
         playFeedback(.start)
         sendWorkoutStateToWatch()
         launchWatchWorkoutSession()
+        // Last, immediately before the clock runs: the anchor is stamped at the moment the
+        // first slot actually begins here.
+        clock.start(plan: built.plan)
     }
 
     private func togglePause() {
-        isPaused.toggle()
+        clock.togglePause()   // re-anchors, tells the Watch, and updates isPaused
         sendWorkoutStateToWatch()
         sendControlToWatch(isPaused ? .workoutPaused : .workoutResumed)
     }
 
-    private func skipCurrent() { advance() }
+    private func skipCurrent() { clock.skip() }
 
-    private func advance() {
-        // Transition done → start holding
-        if isTransitioning {
-            isTransitioning = false
-            timeRemaining = holdDuration
-            playFeedback(.start)
-            sendWorkoutStateToWatch()
-            return
+    /// The last hold ended (or was skipped past): the session is complete.
+    private func finishSession(lastSlot: Int, reason: PlanPlayerClock.Reason) {
+        if reason == .natural, roles.indices.contains(lastSlot), !roles[lastSlot].isTransition {
+            playFeedback(.end)
         }
-
-        // Finished first side of a single-sided stretch → switch to second side
-        if bothSidesMode, currentSide == 0, let stretch = currentStretch, stretch.singleSided {
-            currentSide = 1
-            timeRemaining = holdDuration
-            playFeedback(.start)
-            sendWorkoutStateToWatch()
-            return
-        }
-
-        // Move to next stretch
-        currentIndex += 1
+        isPlaying = false
+        isTransitioning = false
         currentSide = 0
-
-        if currentIndex >= stretches.count {
-            timer?.invalidate()
-            timer = nil
-            isPlaying = false
-            playFeedback(.complete)
-            sendWorkoutCompletedToWatch()
-            showingRecap = true
-            return
-        }
-
-        isTransitioning = true
-        timeRemaining = Self.transitionDuration
-        playFeedback(.start)
-        sendWorkoutStateToWatch()
+        currentIndex = stretches.count
+        playFeedback(.complete)
+        sendWorkoutCompletedToWatch()
+        showingRecap = true
     }
 
     /// Mirrors WorkoutPlayerView: builds the AVPlayerItem off the main thread so swapping clips
@@ -854,26 +938,8 @@ struct StretchPlayerView: View {
         }
     }
 
-    private func startTimer() {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            guard !isPaused else { return }
-            timeRemaining -= 1
-            let t = timeRemaining
-            Task { @MainActor in connectivityManager.sendTimerUpdate(timeRemaining: t) }
-            if timeRemaining == 3 && !isTransitioning {
-                playFeedback(.warning)
-            }
-            if timeRemaining <= 0 {
-                if !isTransitioning { playFeedback(.end) }
-                advance()
-            }
-        }
-    }
-
     private func stopRoutine() {
-        timer?.invalidate()
-        timer = nil
+        clock.stop()
         teardownVideo()
         setIdleTimer(disabled: false)
         sendControlToWatch(.workoutStopped)

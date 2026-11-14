@@ -1021,7 +1021,9 @@ struct SavedRoutinePlayerView: View {
     @State private var timeRemaining = 0
     @State private var isPlaying = false
     @State private var isPaused = false
-    @State private var timer: Timer?
+    /// The shared plan clock: slot and countdown are derived from a plan and anchor, the same way
+    /// the Apple Watch does it. (Replaces a once-a-second timer that decremented a counter.)
+    @State private var clock = PlanPlayerClock()
     @State private var showingRecap = false
     // Recap stats — mirrors WorkoutPlayerView's own tracking so saved/built routines get the
     // same rich WorkoutRecapView instead of a bare name-and-duration screen.
@@ -1074,32 +1076,8 @@ struct SavedRoutinePlayerView: View {
                     VStack(spacing: 16) {
                         Spacer(minLength: 8)
 
-                        // Video area
-                        if let mode = VideoMode(rawValue: videoManager.videoMode), mode != .none {
-#if canImport(AVFoundation)
-                            if let player = avPlayer {
-                                VideoPlayer(player: player)
-                                    .frame(height: 180)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    .padding(.horizontal)
-                            } else if let step = currentStep, !step.isRest {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill(Color.gray.opacity(0.08))
-                                    VStack(spacing: 6) {
-                                        Image(systemName: "video.slash")
-                                            .font(.title)
-                                            .foregroundStyle(.secondary)
-                                        Text("No Video Available")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .frame(height: 180)
-                                .padding(.horizontal)
-                            }
-#endif
-                        }
+                        // Video area (with the live Watch numbers over it, or in its place on a rest step)
+                        videoArea
 
                         // Step name
                         VStack(spacing: 6) {
@@ -1184,7 +1162,9 @@ struct SavedRoutinePlayerView: View {
 
                         #if os(iOS)
                         if isPlaying {
-                            WatchMetricsSection(connectivityManager: connectivityManager)
+                            // The video overlay carries the live numbers; this is just the hint
+                            // when no Watch workout is running.
+                            WatchMetricsSection(connectivityManager: connectivityManager, showsPanelWhenLive: false)
                                 .padding(.horizontal)
                                 .padding(.top, 4)
                         }
@@ -1249,6 +1229,7 @@ struct SavedRoutinePlayerView: View {
         }
         .onAppear {
             buildSteps()
+            configureClock()
             if let first = steps.first { timeRemaining = first.duration }
             setupAudio()
             prepareWatchHandoff()
@@ -1256,6 +1237,10 @@ struct SavedRoutinePlayerView: View {
         }
         .onDisappear { stopRoutine() }
 #if os(iOS)
+        // The Apple Watch made a newer clock anchor (its Pause / Resume / Skip) — follow it
+        .onChange(of: connectivityManager.incomingWatchAnchor) { _, anchor in
+            if let anchor { clock.adopt(anchor) }
+        }
         .onChange(of: connectivityManager.watchRequestedStart) { _, requested in
             if requested {
                 connectivityManager.watchRequestedStart = false
@@ -1316,6 +1301,71 @@ struct SavedRoutinePlayerView: View {
         }
     }
 
+    // MARK: Video area
+
+    /// The demo video (or its placeholder) at the fixed height this player uses.
+    @ViewBuilder
+    private var videoContent: some View {
+        if let mode = VideoMode(rawValue: videoManager.videoMode), mode != .none {
+#if canImport(AVFoundation)
+            if let player = avPlayer {
+                VideoPlayer(player: player)
+                    .frame(height: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            } else if let step = currentStep, !step.isRest {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.gray.opacity(0.08))
+                    VStack(spacing: 6) {
+                        Image(systemName: "video.slash")
+                            .font(.title)
+                            .foregroundStyle(.secondary)
+                        Text("No Video Available")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(height: 180)
+            }
+#endif
+        }
+    }
+
+    /// The video with the live Watch numbers in its corner, or — on a rest step (no video) or with
+    /// video turned off — the numbers standing in for it. Only while a Watch workout is live.
+    @ViewBuilder
+    private var videoArea: some View {
+        #if os(iOS)
+        if isPlaying && connectivityManager.hasLiveWatchSession {
+            let zone = ZoneResolver.resolve(heartRate: connectivityManager.heartRate,
+                                            watchZoneIndex: connectivityManager.watchZoneIndex,
+                                            liveThresholds: connectivityManager.watchZoneThresholds)
+            let videoOff = VideoMode(rawValue: videoManager.videoMode).map { $0 == .none } ?? false
+            let noVideoShown = (currentStep?.isRest ?? false) || videoOff
+            if noVideoShown {
+                WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: zone,
+                                    calories: connectivityManager.activeCalories,
+                                    elapsedSeconds: totalExerciseTime + totalRestTime, style: .panel)
+                    .frame(height: 180)
+                    .padding(.horizontal)
+            } else {
+                videoContent
+                    .overlay(alignment: .topLeading) {
+                        WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: zone,
+                                            calories: connectivityManager.activeCalories,
+                                            elapsedSeconds: totalExerciseTime + totalRestTime, style: .corner)
+                            .padding(8)
+                    }
+                    .padding(.horizontal)
+            }
+        } else {
+            videoContent.padding(.horizontal)
+        }
+        #else
+        videoContent.padding(.horizontal)
+        #endif
+    }
+
     private func buildSteps() {
         var result: [PlayerStep] = []
         for ex in routine.exercises {
@@ -1338,6 +1388,52 @@ struct SavedRoutinePlayerView: View {
         steps = result
     }
 
+    /// Wires the clock's callbacks to this player's state. Done once, when the player appears.
+    private func configureClock() {
+        #if os(iOS)
+        clock.link = .watch
+        #endif
+        clock.onElapsed = { slot, seconds in
+            guard steps.indices.contains(slot) else { return }
+            if steps[slot].isRest { totalRestTime += seconds } else { totalExerciseTime += seconds }
+        }
+        clock.onSecond = { remaining in
+            timeRemaining = remaining
+            #if os(iOS)
+            let hr = connectivityManager.heartRate
+            if hr > 0 {
+                heartRateSamples.append(hr)
+                if hr > peakHeartRate { peakHeartRate = hr }
+            }
+            connectivityManager.sendTimerUpdate(timeRemaining: remaining)
+            #endif
+        }
+        clock.onReset = { remaining in timeRemaining = remaining }
+        clock.onWarning = { playBeep(type: .warning) }
+        clock.onSlotChange = { from, to, _ in
+            playBeep(type: .end)
+            if steps.indices.contains(from), !steps[from].isRest {
+                completedStepNames.append(steps[from].label)
+            }
+            currentIndex = to
+            timeRemaining = clock.remaining
+            sendWorkoutStateToWatch()
+            prepareVideoForCurrentStep(autoplay: !isPaused)
+        }
+        clock.onPauseChange = { paused, byWatch in
+            isPaused = paused
+#if canImport(AVFoundation)
+            if paused { avPlayer?.pause() } else { avPlayer?.play() }
+#endif
+            // The Watch already paused/resumed its own HealthKit session; a local toggle sends
+            // that control message itself (see togglePause()).
+            if byWatch { sendWorkoutStateToWatch() }
+        }
+        clock.onFinish = { last, _ in
+            finishRoutine(lastSlot: last)
+        }
+    }
+
     private func startRoutine() {
         guard !steps.isEmpty else { return }
         isPlaying = true
@@ -1345,38 +1441,38 @@ struct SavedRoutinePlayerView: View {
         currentIndex = 0
         timeRemaining = steps[0].duration
         setIdleTimer(disabled: true)
-        scheduleTimer()
         playBeep(type: .start)
         sendWorkoutStateToWatch()
         launchWatchWorkoutSession()
         prepareVideoForCurrentStep(autoplay: true)
+        // Last, immediately before the clock runs: the anchor is stamped at the moment the first
+        // step actually begins here.
+        clock.start(plan: makePlan())
+    }
+
+    /// The steps as a plan: each step's name, rest flag, side label and duration, with Both Sides,
+    /// holds, rests and custom timers already applied by `buildSteps()`.
+    private func makePlan() -> WorkoutPlan {
+        WorkoutPlan(
+            id: UUID().uuidString,
+            createdAt: Date().timeIntervalSince1970,
+            slots: steps.map { PlanSlot(name: $0.label, isRest: $0.isRest, duration: $0.duration, sideLabel: $0.sideLabel) },
+            activityTypeRaw: declaredActivityTypeRaw
+        )
     }
 
     private func togglePause() {
-        isPaused.toggle()
-        if isPaused {
-            timer?.invalidate()
-            timer = nil
-#if canImport(AVFoundation)
-            avPlayer?.pause()
-#endif
-        } else {
-            scheduleTimer()
-#if canImport(AVFoundation)
-            avPlayer?.play()
-#endif
-        }
+        clock.togglePause()   // re-anchors, tells the Watch, and updates isPaused / the video
         sendWorkoutStateToWatch()
         sendControlToWatch(isPaused ? .workoutPaused : .workoutResumed)
     }
 
     private func skipStep() {
-        advance()
+        clock.skip()
     }
 
     private func stopRoutine() {
-        timer?.invalidate()
-        timer = nil
+        clock.stop()
         isPlaying = false
         setIdleTimer(disabled: false)
         sendControlToWatch(.workoutStopped)
@@ -1390,76 +1486,33 @@ struct SavedRoutinePlayerView: View {
 #endif
     }
 
-    private func scheduleTimer() {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            tick()
-        }
-    }
-
-    private func tick() {
-        guard isPlaying && !isPaused else { return }
-        if timeRemaining > 1 {
-            timeRemaining -= 1
-
-            if currentStep?.isRest == true {
-                totalRestTime += 1
-            } else {
-                totalExerciseTime += 1
-            }
-
-#if os(iOS)
-            let hr = connectivityManager.heartRate
-            if hr > 0 {
-                heartRateSamples.append(hr)
-                if hr > peakHeartRate { peakHeartRate = hr }
-            }
-#endif
-
-            let t = timeRemaining
-            connectivityManager.sendTimerUpdate(timeRemaining: t)
-            if timeRemaining == 3 { playBeep(type: .warning) }
-        } else {
-            advance()
-        }
-    }
-
-    private func advance() {
+    /// The last step ended (or was skipped past): the routine is complete.
+    private func finishRoutine(lastSlot: Int) {
         playBeep(type: .end)
-        if let step = currentStep, !step.isRest {
-            completedStepNames.append(step.label)
+        if steps.indices.contains(lastSlot), !steps[lastSlot].isRest {
+            completedStepNames.append(steps[lastSlot].label)
         }
-        let next = currentIndex + 1
-        if next < steps.count {
-            currentIndex = next
-            timeRemaining = steps[next].duration
-            sendWorkoutStateToWatch()
-            prepareVideoForCurrentStep(autoplay: true)
-        } else {
-            timer?.invalidate()
-            timer = nil
-            isPlaying = false
-            setIdleTimer(disabled: false)
-            playBeep(type: .complete)
+        isPlaying = false
+        setIdleTimer(disabled: false)
+        playBeep(type: .complete)
 #if os(iOS)
-            connectivityManager.sendWorkoutCompleted(
-                count: completedStepNames.count,
-                totalSeconds: totalExerciseTime + totalRestTime,
-                label: routine.name
-            )
+        connectivityManager.sendWorkoutCompleted(
+            count: completedStepNames.count,
+            totalSeconds: totalExerciseTime + totalRestTime,
+            label: routine.name
+        )
 #endif
-            sendControlToWatch(.workoutStopped)
+        sendControlToWatch(.workoutStopped)
 #if canImport(AVFoundation)
-            avPlayer?.pause()
-            avPlayer = nil
-            if let obs = playerEndObserver {
-                NotificationCenter.default.removeObserver(obs)
-                playerEndObserver = nil
-            }
+        avPlayer?.pause()
+        avPlayer = nil
+        if let obs = playerEndObserver {
+            NotificationCenter.default.removeObserver(obs)
+            playerEndObserver = nil
+        }
 #endif
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                showingRecap = true
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            showingRecap = true
         }
     }
 

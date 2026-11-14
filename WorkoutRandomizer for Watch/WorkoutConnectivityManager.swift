@@ -379,17 +379,21 @@ extension WorkoutConnectivityManager: WCSessionDelegate {
         if isFinishing { isFinishing = false }
 
         let slot = plan.slots[position.slotIndex]
-        let next = position.slotIndex + 1 < plan.slots.count ? plan.slots[position.slotIndex + 1].name : nil
+        let next = plan.nextName(afterSlot: position.slotIndex)
+        let progress = plan.progress(forSlot: position.slotIndex)
         let current = workoutState
-        if current?.currentIndex != position.slotIndex
+        if current?.currentIndex != progress.item - 1
+            || current?.isRest != slot.isRest
             || current?.timeRemaining != position.remaining
             || current?.isPaused != !anchor.isRunning
             || current?.currentExerciseName != slot.name
+            || current?.nextExerciseName != next
+            || current?.sideLabel != slot.sideLabel
             || current?.isPlaying != true {
             workoutState = WorkoutState(
                 currentExerciseName: slot.name,
-                currentIndex: position.slotIndex,
-                totalExercises: plan.slots.count,
+                currentIndex: progress.item - 1,
+                totalExercises: progress.total,
                 timeRemaining: position.remaining,
                 isRest: slot.isRest,
                 nextExerciseName: next,

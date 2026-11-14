@@ -26,6 +26,38 @@ nonisolated struct PlanSlot: Codable, Equatable, Sendable {
     var duration: Int
     /// e.g. "Left Side" for single-sided stretches.
     var sideLabel: String? = nil
+    /// Which item of the routine this slot belongs to, for the "N of M" progress line. Left nil,
+    /// each slot counts as its own item. A stretch session sets it so a stretch's two sides and
+    /// the "Get Ready" slot before it all count as one stretch.
+    var groupIndex: Int? = nil
+    /// What to show as "Next" while this slot is current, when that isn't simply the next slot's
+    /// name (a stretch's "Get Ready" slot points at the stretch it leads into, and a hold points
+    /// at the next stretch rather than its own second side). Only used when `hasNextName` is set.
+    var nextName: String? = nil
+    var hasNextName: Bool = false
+
+    init(name: String, isRest: Bool, duration: Int, sideLabel: String? = nil,
+         groupIndex: Int? = nil, nextName: String? = nil, hasNextName: Bool = false) {
+        self.name = name
+        self.isRest = isRest
+        self.duration = duration
+        self.sideLabel = sideLabel
+        self.groupIndex = groupIndex
+        self.nextName = nextName
+        self.hasNextName = hasNextName
+    }
+
+    // Decoded leniently so a plan from a build that predates the optional fields still reads.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        isRest = try c.decode(Bool.self, forKey: .isRest)
+        duration = try c.decode(Int.self, forKey: .duration)
+        sideLabel = try c.decodeIfPresent(String.self, forKey: .sideLabel)
+        groupIndex = try c.decodeIfPresent(Int.self, forKey: .groupIndex)
+        nextName = try c.decodeIfPresent(String.self, forKey: .nextName)
+        hasNextName = try c.decodeIfPresent(Bool.self, forKey: .hasNextName) ?? false
+    }
 }
 
 nonisolated struct WorkoutPlan: Codable, Equatable, Sendable {
@@ -36,6 +68,9 @@ nonisolated struct WorkoutPlan: Codable, Equatable, Sendable {
     var slots: [PlanSlot]
     /// `HKWorkoutActivityType` raw value the Watch should record the session as.
     var activityTypeRaw: UInt? = nil
+    /// Number of items for the "N of M" progress line when slots are grouped (see
+    /// `PlanSlot.groupIndex`). Nil means one item per slot.
+    var groupCount: Int? = nil
 }
 
 /// A plan together with the anchor it starts from — what the iPhone sends when a workout starts
@@ -89,6 +124,23 @@ nonisolated struct PlanPosition: Equatable, Sendable {
     /// The plan has run out of slots. The Watch shows "Finishing…" from here until the iPhone
     /// confirms the workout is over.
     var isFinished: Bool
+}
+
+extension WorkoutPlan {
+    /// Combined length of every slot, in seconds.
+    var totalSeconds: Int { slots.reduce(0) { $0 + max(0, $1.duration) } }
+
+    /// The "N" and "M" of the progress line for a slot (both one-based/total).
+    func progress(forSlot index: Int) -> (item: Int, total: Int) {
+        let slot = slots.indices.contains(index) ? slots[index] : nil
+        return ((slot?.groupIndex ?? index) + 1, groupCount ?? slots.count)
+    }
+
+    /// What to show as "Next" while `index` is current.
+    func nextName(afterSlot index: Int) -> String? {
+        if slots.indices.contains(index), slots[index].hasNextName { return slots[index].nextName }
+        return index + 1 < slots.count ? slots[index + 1].name : nil
+    }
 }
 
 nonisolated enum PlanClock {
