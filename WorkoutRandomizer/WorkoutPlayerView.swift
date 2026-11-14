@@ -398,12 +398,16 @@ struct WorkoutPlayerView: View {
                 // a size down so the stats tile stays clear of the Pause/Skip bar instead of
                 // sliding under it.
                 let isCompactHeight = !isRegular && proxy.size.height < 720
+                // (Per platform, so macOS — where `isRegular` is always false — doesn't carry the
+                // regular-width arms as dead code.)
                 #if os(iOS)
                 let videoMaxH: CGFloat = isRegular ? 420 : (isCompactHeight ? 120 : (isLandscape ? 110 : 180))
+                let videoHeightFraction: CGFloat = isCompactHeight ? 0.25 : (isRegular ? 0.4 : 0.35)
                 #else
                 let videoMaxH: CGFloat = 220
+                let videoHeightFraction: CGFloat = isCompactHeight ? 0.25 : 0.35
                 #endif
-                let videoHeight = min(proxy.size.height * (isCompactHeight ? 0.25 : (isRegular ? 0.4 : 0.35)), videoMaxH)
+                let videoHeight = min(proxy.size.height * videoHeightFraction, videoMaxH)
                 let sectionSpacing: CGFloat = isCompactHeight ? 10 : 16
                 let buttonSize: CGFloat = isCompactHeight ? 64 : 80
                 let iconSize: CGFloat = isCompactHeight ? 24 : 30
