@@ -89,6 +89,9 @@ struct WorkoutGeneratorApp: App {
 #if os(iOS)
         // Activate WatchConnectivity session early so it's ready when needed
         _ = WorkoutConnectivityManager.shared
+        // Be ready to receive the Watch's mirrored workout session (HealthKit may launch the app
+        // in the background to deliver it, so this has to be in place at launch).
+        WatchWorkoutMirror.shared.install()
 #endif
     }
     

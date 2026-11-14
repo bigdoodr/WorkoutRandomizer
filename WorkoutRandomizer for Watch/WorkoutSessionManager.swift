@@ -23,6 +23,13 @@ class WorkoutSessionManager: NSObject, ObservableObject {
     /// True once HealthKit has told us the zone itself (didUpdateWorkoutZone). From then on that
     /// is the authority and the manual classification against thresholds below stands down.
     private var systemZoneReported = false
+    /// True once the session is mirrored to the iPhone. From then on every sample is also sent over
+    /// that mirrored session, which keeps flowing with the screen off (unlike WatchConnectivity,
+    /// which needs the Watch app reachable).
+    private var isMirroring = false
+    /// Logged once per session, so a link that's down doesn't flood the log with one line per sample.
+    private var loggedMirrorSendFailure = false
+    private static let mirrorLog = Logger(subsystem: "rocks.scruggsfam.productions.WorkoutRandomizer", category: "Mirror")
 
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
@@ -138,6 +145,7 @@ class WorkoutSessionManager: NSObject, ObservableObject {
         
         let startDate = Date()
         session.startActivity(with: startDate)
+        startMirroring(session)
 
         // Use the user's preferred HR zone config if one exists; otherwise install
         // a standard 5-zone fallback so zone tracking is always active.
@@ -218,7 +226,26 @@ class WorkoutSessionManager: NSObject, ObservableObject {
         return config
     }
     
+    /// Mirrors the session to the paired iPhone so it can follow the workout's state and receive
+    /// live metrics without depending on WatchConnectivity reachability. Failure is not fatal: the
+    /// WatchConnectivity path still works while the Watch app is reachable.
+    private func startMirroring(_ session: HKWorkoutSession) {
+        session.startMirroringToCompanionDevice { [weak self] success, error in
+            if let error {
+                Self.mirrorLog.error("Mirroring to iPhone failed: \(error.localizedDescription)")
+            } else {
+                Self.mirrorLog.notice("Mirroring to iPhone started: \(success)")
+            }
+            DispatchQueue.main.async {
+                self?.isMirroring = success
+                if success { self?.sendHealthMetricsToPhone() }
+            }
+        }
+    }
+
     private func resetWorkout() {
+        isMirroring = false
+        loggedMirrorSendFailure = false
         session = nil
         builder = nil
         preparedConfiguration = nil
@@ -264,6 +291,7 @@ extension WorkoutSessionManager: HKWorkoutSessionDelegate {
         
         DispatchQueue.main.async {
             self.isWorkoutActive = (toState == .running || toState == .paused)
+            self.sendHealthMetricsToPhone()
         }
         
         if toState == .ended {
@@ -351,8 +379,27 @@ extension WorkoutSessionManager: HKLiveWorkoutBuilderDelegate {
     }
 
     // MARK: - Send Health Metrics to iPhone
+
+    /// The same numbers, over the mirrored session. This is the route that works with the screen
+    /// off; WatchConnectivity below is the fallback.
+    private func sendMetricsOverMirroredSession() {
+        guard isMirroring, let session else { return }
+        let metrics = WatchHealthMetrics(heartRate: heartRate, activeCalories: activeCalories,
+                                         isWorkoutActive: isWorkoutActive,
+                                         zoneIndex: currentZoneIndex, zoneThresholds: zoneThresholds)
+        guard let data = try? JSONEncoder().encode(metrics) else { return }
+        session.sendToRemoteWorkoutSession(data: data) { [weak self] _, error in
+            guard let error else { return }
+            DispatchQueue.main.async {
+                guard let self, !self.loggedMirrorSendFailure else { return }
+                self.loggedMirrorSendFailure = true
+                Self.mirrorLog.error("Sending metrics to iPhone over the mirrored session failed (will keep trying, WatchConnectivity is the fallback): \(error.localizedDescription)")
+            }
+        }
+    }
     
     private func sendHealthMetricsToPhone() {
+        sendMetricsOverMirroredSession()
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.isReachable else { return }

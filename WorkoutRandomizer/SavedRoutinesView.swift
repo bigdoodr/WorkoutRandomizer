@@ -1073,14 +1073,14 @@ struct SavedRoutinePlayerView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 ScrollView {
-                    VStack(spacing: 16) {
-                        Spacer(minLength: 8)
+                    VStack(spacing: 12) {
+                        // Video with the countdown over it (and the live Watch numbers during a
+                        // Watch workout); on a rest step, or with video off, the same content
+                        // fills the video's place. Full width, 16:9.
+                        videoBlock
 
-                        // Video area (with the live Watch numbers over it, or in its place on a rest step)
-                        videoArea
-
-                        // Step name
-                        VStack(spacing: 6) {
+                        VStack(spacing: 8) {
+                            // Step name
                             if let step = currentStep {
                                 if let side = step.sideLabel {
                                     Text(side)
@@ -1092,86 +1092,49 @@ struct SavedRoutinePlayerView: View {
                                         .clipShape(Capsule())
                                 }
                                 Text(step.label)
-                                    .font(.largeTitle)
+                                    .font(.title)
                                     .fontWeight(.bold)
                                     .multilineTextAlignment(.center)
-                                    .padding(.horizontal)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.8)
                             } else {
                                 Text("Complete!")
-                                    .font(.largeTitle)
+                                    .font(.title)
                                     .fontWeight(.bold)
                                     .foregroundStyle(.green)
                             }
-                        }
 
-                        // Timer ring
-                        ZStack {
-                            Circle()
-                                .stroke(Color.gray.opacity(0.15), lineWidth: 10)
-                            Circle()
-                                .trim(from: 0, to: timerProgress)
-                                .stroke(
-                                    currentStep?.isRest == true ? Color.blue : routine.accentColor,
-                                    style: StrokeStyle(lineWidth: 10, lineCap: .round)
-                                )
-                                .rotationEffect(.degrees(-90))
-                                .animation(.linear(duration: 1), value: timeRemaining)
-                            Text(isPlaying ? "\(timeRemaining)" : "\(currentStep?.duration ?? 0)")
-                                .font(.system(size: 64, weight: .bold, design: .monospaced))
-                                .foregroundStyle(timeRemaining <= 3 && isPlaying ? .red : .primary)
-                        }
-                        .frame(width: 180, height: 180)
+                            // Up next
+                            if isPlaying && currentIndex < steps.count {
+                                HStack(spacing: 4) {
+                                    Text("Up Next:")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    Text(nextUpText)
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
+                                }
+                            }
 
-                        // Progress and Next up
-                        if !steps.isEmpty {
-                            Text("Step \(min(currentIndex + 1, steps.count)) of \(steps.count)")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if isPlaying && currentIndex < steps.count {
-                            HStack(spacing: 4) {
-                                Text("Next:")
+                            // Small "Step N of M"
+                            if !steps.isEmpty {
+                                Text("Step \(min(currentIndex + 1, steps.count)) of \(steps.count)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text(nextUpText)
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
                             }
-                        }
 
-                        // Live workout stats (exercise time, HR zone, nutrient burn) and the
-                        // Apple Watch metrics panel — the same ones generated workouts show.
-                        if isPlaying {
                             #if os(iOS)
-                            WorkoutLiveStatsView(
-                                exerciseTime: totalExerciseTime,
-                                heartRate: connectivityManager.heartRate,
-                                hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
-                                intention: intention,
-                                zoneThresholds: connectivityManager.watchZoneThresholds,
-                                watchZoneIndex: connectivityManager.watchZoneIndex
-                            )
-                            .padding(.top, 4)
-                            #else
-                            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false, intention: intention)
-                                .padding(.top, 4)
+                            if isPlaying {
+                                // The overlay carries the live numbers; this is just the hint when
+                                // no Watch workout is running.
+                                WatchMetricsSection(connectivityManager: connectivityManager, showsPanelWhenLive: false)
+                            }
                             #endif
                         }
-
-                        #if os(iOS)
-                        if isPlaying {
-                            // The video overlay carries the live numbers; this is just the hint
-                            // when no Watch workout is running.
-                            WatchMetricsSection(connectivityManager: connectivityManager, showsPanelWhenLive: false)
-                                .padding(.horizontal)
-                                .padding(.top, 4)
-                        }
-                        #endif
-
-                        Spacer(minLength: 8)
+                        .padding(.horizontal)
                     }
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
 
                 // Controls
@@ -1303,67 +1266,63 @@ struct SavedRoutinePlayerView: View {
 
     // MARK: Video area
 
-    /// The demo video (or its placeholder) at the fixed height this player uses.
-    @ViewBuilder
-    private var videoContent: some View {
-        if let mode = VideoMode(rawValue: videoManager.videoMode), mode != .none {
-#if canImport(AVFoundation)
-            if let player = avPlayer {
-                VideoPlayer(player: player)
-                    .frame(height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-            } else if let step = currentStep, !step.isRest {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.gray.opacity(0.08))
-                    VStack(spacing: 6) {
-                        Image(systemName: "video.slash")
-                            .font(.title)
-                            .foregroundStyle(.secondary)
-                        Text("No Video Available")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(height: 180)
-            }
-#endif
-        }
+    /// The live Watch numbers for the overlay — present only while a Watch workout is running.
+    private var liveSnapshot: LiveMetricsSnapshot? {
+        #if os(iOS)
+        guard isPlaying, connectivityManager.hasLiveWatchSession else { return nil }
+        return LiveMetricsSnapshot(
+            heartRate: connectivityManager.heartRate,
+            zone: ZoneResolver.resolve(heartRate: connectivityManager.heartRate,
+                                       watchZoneIndex: connectivityManager.watchZoneIndex,
+                                       liveThresholds: connectivityManager.watchZoneThresholds),
+            calories: connectivityManager.activeCalories,
+            elapsedSeconds: totalExerciseTime + totalRestTime
+        )
+        #else
+        return nil
+        #endif
     }
 
-    /// The video with the live Watch numbers in its corner, or — on a rest step (no video) or with
-    /// video turned off — the numbers standing in for it. Only while a Watch workout is live.
+    /// The demo video (or its placeholder), filling whatever space it's given.
     @ViewBuilder
-    private var videoArea: some View {
-        #if os(iOS)
-        if isPlaying && connectivityManager.hasLiveWatchSession {
-            let zone = ZoneResolver.resolve(heartRate: connectivityManager.heartRate,
-                                            watchZoneIndex: connectivityManager.watchZoneIndex,
-                                            liveThresholds: connectivityManager.watchZoneThresholds)
-            let videoOff = VideoMode(rawValue: videoManager.videoMode).map { $0 == .none } ?? false
-            let noVideoShown = (currentStep?.isRest ?? false) || videoOff
-            if noVideoShown {
-                WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: zone,
-                                    calories: connectivityManager.activeCalories,
-                                    elapsedSeconds: totalExerciseTime + totalRestTime, style: .panel)
-                    .frame(height: 180)
-                    .padding(.horizontal)
-            } else {
-                videoContent
-                    .overlay(alignment: .topLeading) {
-                        WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: zone,
-                                            calories: connectivityManager.activeCalories,
-                                            elapsedSeconds: totalExerciseTime + totalRestTime, style: .corner)
-                            .padding(8)
-                    }
-                    .padding(.horizontal)
-            }
+    private var videoContent: some View {
+#if canImport(AVFoundation)
+        if let player = avPlayer {
+            VideoPlayer(player: player)
         } else {
-            videoContent.padding(.horizontal)
+            ZStack {
+                Rectangle().fill(Color.gray.opacity(0.08))
+                VStack(spacing: 6) {
+                    Image(systemName: "video.slash")
+                        .font(.title)
+                        .foregroundStyle(.secondary)
+                    Text("No Video Available")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
-        #else
-        videoContent.padding(.horizontal)
-        #endif
+#endif
+    }
+
+    /// The video with the countdown (and, during a live Watch workout, the heart-rate numbers)
+    /// over it. On a rest step, or with video turned off, the same content is drawn enlarged in
+    /// the video's place.
+    @ViewBuilder
+    private var videoBlock: some View {
+        let videoOff = VideoMode(rawValue: videoManager.videoMode).map { $0 == .none } ?? false
+        if (currentStep?.isRest ?? false) || videoOff {
+            PlayerOverlay(countdown: timeRemaining, progress: isPlaying ? timerProgress : nil,
+                          live: liveSnapshot, style: .panel)
+                .aspectRatio(16 / 9, contentMode: .fit)
+        } else {
+            videoContent
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .overlay {
+                    PlayerOverlay(countdown: timeRemaining, progress: isPlaying ? timerProgress : nil,
+                                  live: liveSnapshot, style: .corner)
+                }
+        }
     }
 
     private func buildSteps() {

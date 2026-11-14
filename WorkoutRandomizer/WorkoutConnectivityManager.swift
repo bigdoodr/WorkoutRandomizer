@@ -39,23 +39,12 @@ public struct WorkoutState: Codable {
     public var activityTypeRaw: UInt? = nil
 }
 
-// Health metrics sent from Watch to iPhone
-struct WatchHealthMetrics: Codable {
-    let heartRate: Double
-    let activeCalories: Double
-    let isWorkoutActive: Bool
-    /// The zone HealthKit says the wearer is in (zero-based); absent or negative when unknown.
-    var zoneIndex: Int? = nil
-    /// The Watch's zone boundaries, repeated with every sample so the iPhone never depends on the
-    /// single message sent at session start having arrived.
-    var zoneThresholds: [Double]? = nil
-}
-
 #if os(iOS)
 
 // MARK: - iOS-specific WorkoutConnectivityManager
 
 import WatchConnectivity
+import os
 
 @MainActor
 class WorkoutConnectivityManager: ObservableObject {
@@ -91,10 +80,28 @@ class WorkoutConnectivityManager: ObservableObject {
     /// application context so a Watch that wakes up late still gets it.
     private(set) var latestPlanSync: PlanSync?
 
-    /// A Watch workout is running and the Watch can be reached — the only time its live metrics
-    /// mean anything. Paired-but-idle, out of range, or "No active workout" all read as false.
-    var hasLiveWatchSession: Bool {
-        isWatchConnected && isWatchReachable && isWatchWorkoutActive
+    /// Whether the Apple Watch has a workout session running. This — and only this — decides
+    /// whether the live overlay shows. It does NOT depend on the Watch being reachable: with the
+    /// screen off the Watch app may be unreachable over WatchConnectivity while its workout session
+    /// carries on, and the overlay must stay up for as long as that session does.
+    var hasLiveWatchSession: Bool { isWatchWorkoutActive }
+
+    /// The mirrored HealthKit session says the Watch workout is running (set by `WatchWorkoutMirror`).
+    private var mirroredSessionActive = false
+    /// The last WatchConnectivity metrics message said the Watch workout is running.
+    private var wcReportsActive = false
+
+    private func refreshWatchWorkoutActive() {
+        let active = mirroredSessionActive || wcReportsActive
+        if isWatchWorkoutActive != active { isWatchWorkoutActive = active }
+        if !active, watchZoneIndex != nil { watchZoneIndex = nil }
+    }
+
+    /// The mirrored workout session's state changed (the authoritative, reachability-independent
+    /// signal). Running or paused is "active"; stopped, ended or gone is not.
+    func mirroredSessionStateChanged(active: Bool) {
+        mirroredSessionActive = active
+        refreshWatchWorkoutActive()
     }
 
     private let session: WCSession? = WCSession.isSupported() ? WCSession.default : nil
@@ -221,7 +228,9 @@ class WorkoutConnectivityManager: ObservableObject {
         guard let session = session else { return }
 
         if control == .workoutStopped {
-            isWatchWorkoutActive = false
+            wcReportsActive = false
+            mirroredSessionActive = false
+            refreshWatchWorkoutActive()
             watchZoneIndex = nil
             endPlan()
             markSessionEndedInContext()
@@ -282,6 +291,12 @@ class WorkoutConnectivityManager: ObservableObject {
     func beginPlan(_ sync: PlanSync) {
         latestPlanSync = sync
         incomingWatchAnchor = nil
+        // A stale "Watch is active" from an earlier session must not carry into this one; the next
+        // metrics message (or the mirrored session, which isn't reset) re-establishes it.
+        if wcReportsActive {
+            wcReportsActive = false
+            refreshWatchWorkoutActive()
+        }
         pushPlanSync()
     }
 
@@ -345,15 +360,17 @@ class WorkoutConnectivityManager: ObservableObject {
 
     // MARK: - Receive health metrics from Watch
 
+    /// Live numbers from the Watch, from either route (mirrored session or WatchConnectivity).
     nonisolated func receiveHealthMetrics(_ metrics: WatchHealthMetrics) {
         Task { @MainActor in
             self.heartRate = metrics.heartRate
             self.activeCalories = metrics.activeCalories
-            self.isWatchWorkoutActive = metrics.isWorkoutActive
+            self.wcReportsActive = metrics.isWorkoutActive
+            self.refreshWatchWorkoutActive()
             // The Watch's zone, while its session is running.
             if metrics.isWorkoutActive, let zone = metrics.zoneIndex, zone >= 0 {
                 if self.watchZoneIndex != zone { self.watchZoneIndex = zone }
-            } else if self.watchZoneIndex != nil {
+            } else if !metrics.isWorkoutActive, self.watchZoneIndex != nil {
                 self.watchZoneIndex = nil
             }
             if let thresholds = metrics.zoneThresholds, thresholds.count == 4, thresholds != self.watchZoneThresholds {
@@ -396,6 +413,11 @@ private class WatchConnectivityDelegate: NSObject, WCSessionDelegate {
     func sessionReachabilityDidChange(_ session: WCSession) {
         Task { @MainActor in
             WorkoutConnectivityManager.shared.isWatchReachable = session.isReachable
+            // Diagnostic: with the Watch screen off, reachability can drop while its workout
+            // session carries on. This line shows when that happens (and that the overlay,
+            // which follows the session, is unaffected).
+            Logger(subsystem: "rocks.scruggsfam.productions.WorkoutRandomizer", category: "Link")
+                .notice("Watch reachable: \(session.isReachable), workout active: \(WorkoutConnectivityManager.shared.isWatchWorkoutActive)")
         }
     }
 

@@ -796,3 +796,40 @@ struct StretchPlanTests {
         #expect(plan.totalSeconds == 110)
     }
 }
+
+// MARK: - Live Watch session visibility
+
+@MainActor
+struct LiveWatchSessionTests {
+
+    /// The overlay must follow the Watch workout session, not whether the Watch is reachable: with
+    /// its screen off the Watch app can be unreachable while the session carries on.
+    @Test func overlayFollowsTheSessionNotReachability() {
+        let manager = WorkoutConnectivityManager.shared
+        manager.mirroredSessionStateChanged(active: false)
+        #expect(!manager.hasLiveWatchSession)
+
+        manager.isWatchConnected = true
+        manager.isWatchReachable = true
+        manager.mirroredSessionStateChanged(active: true)
+        #expect(manager.hasLiveWatchSession)
+
+        // The Watch screen goes off and the app becomes unreachable: still live.
+        manager.isWatchReachable = false
+        #expect(manager.hasLiveWatchSession)
+        manager.isWatchConnected = false
+        #expect(manager.hasLiveWatchSession)
+
+        // Only the session ending turns it off.
+        manager.mirroredSessionStateChanged(active: false)
+        #expect(!manager.hasLiveWatchSession)
+    }
+
+    @Test func aReachableWatchWithNoSessionIsNotLive() {
+        let manager = WorkoutConnectivityManager.shared
+        manager.mirroredSessionStateChanged(active: false)
+        manager.isWatchConnected = true
+        manager.isWatchReachable = true
+        #expect(!manager.hasLiveWatchSession)
+    }
+}

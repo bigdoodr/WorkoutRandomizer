@@ -138,80 +138,78 @@ struct WorkoutPlayerView: View {
     // Split out of `body` so the same pieces can sit in one column (portrait, compact) or in two
     // (landscape on a regular-width display such as the Duo's inner screen).
 
-    /// The video area: the demo video with the live Watch numbers in its corner, or — on a rest
-    /// screen (no video) — the numbers standing in for it.
-    @ViewBuilder
-    private func videoBlock(height videoHeight: CGFloat) -> some View {
+    /// The live Watch numbers for the overlay — present only while a Watch workout is running.
+    private var liveSnapshot: LiveMetricsSnapshot? {
         #if os(iOS)
-        if connectivityManager.hasLiveWatchSession {
-            let zone = ZoneResolver.resolve(heartRate: connectivityManager.heartRate,
-                                            watchZoneIndex: connectivityManager.watchZoneIndex,
-                                            liveThresholds: connectivityManager.watchZoneThresholds)
-            let noVideoShown = isRest || VideoMode(rawValue: videoManager.videoMode) == Optional.none
-            if noVideoShown {
-                WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: zone,
-                                    calories: connectivityManager.activeCalories,
-                                    elapsedSeconds: totalExerciseTime + totalRestTime, style: .panel)
-                    .frame(height: videoHeight)
-            } else {
-                videoContent(height: videoHeight)
-                    .overlay(alignment: .topLeading) {
-                        WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: zone,
-                                            calories: connectivityManager.activeCalories,
-                                            elapsedSeconds: totalExerciseTime + totalRestTime, style: .corner)
-                            .padding(8)
-                    }
-            }
-        } else {
-            videoContent(height: videoHeight)
-        }
+        guard connectivityManager.hasLiveWatchSession else { return nil }
+        return LiveMetricsSnapshot(
+            heartRate: connectivityManager.heartRate,
+            zone: ZoneResolver.resolve(heartRate: connectivityManager.heartRate,
+                                       watchZoneIndex: connectivityManager.watchZoneIndex,
+                                       liveThresholds: connectivityManager.watchZoneThresholds),
+            calories: connectivityManager.activeCalories,
+            elapsedSeconds: totalExerciseTime + totalRestTime
+        )
         #else
-        videoContent(height: videoHeight)
+        return nil
         #endif
     }
 
-    /// The demo video (or its placeholder) at a given height.
-    @ViewBuilder
-    private func videoContent(height videoHeight: CGFloat) -> some View {
-        if VideoMode(rawValue: videoManager.videoMode) != Optional.none {
-            if let player = avPlayer {
-                #if os(macOS)
-                AVPlayerLayerView(player: player)
-                    .frame(height: videoHeight)
-                    .cornerRadius(10)
-                #else
-                VideoPlayer(player: player)
-                    .frame(height: videoHeight)
-                    .cornerRadius(10)
-                #endif
-            } else if videoURL != nil {
-                Rectangle()
-                    .fill(Color.black.opacity(0.1))
-                    .frame(height: videoHeight)
-                    .cornerRadius(10)
-            } else if !isRest {
-                // Exercise has no video — show a subtle placeholder
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.gray.opacity(0.08))
-                    VStack(spacing: 6) {
-                        Image(systemName: "video.slash")
-                            .font(.title)
-                            .foregroundStyle(.secondary)
-                        Text("No Video Available")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(height: videoHeight)
-            }
-        }
-
+    /// 0...1 through the current slot, for the thin progress bar.
+    private var slotProgress: Double? {
+        guard isPlaying, durationForCurrentPosition > 0 else { return nil }
+        return Double(timeRemaining) / Double(durationForCurrentPosition)
     }
 
-    /// Exercise name, countdown, progress and the live stats panels.
+    /// The video area, Fitness+ style: the demo video with the countdown over it (and, during a
+    /// live Watch workout, the heart-rate numbers). On a rest screen, or with video turned off,
+    /// the same content is drawn enlarged in the video's place. Always 16:9, full width.
     @ViewBuilder
-    private func infoBlock(compact: Bool) -> some View {
+    private func videoBlock() -> some View {
+        let videoOff = VideoMode(rawValue: videoManager.videoMode).map { $0 == .none } ?? false
+        if isRest || videoOff {
+            PlayerOverlay(countdown: timeRemaining, progress: slotProgress, live: liveSnapshot, style: .panel)
+                .aspectRatio(16 / 9, contentMode: .fit)
+        } else {
+            videoContent
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .overlay {
+                    PlayerOverlay(countdown: timeRemaining, progress: slotProgress, live: liveSnapshot, style: .corner)
+                }
+        }
+    }
+
+    /// The demo video (or its placeholder), filling whatever space it's given.
+    @ViewBuilder
+    private var videoContent: some View {
+        if let player = avPlayer {
+            #if os(macOS)
+            AVPlayerLayerView(player: player)
+            #else
+            VideoPlayer(player: player)
+            #endif
+        } else if videoURL != nil {
+            Rectangle().fill(Color.black.opacity(0.1))
+        } else {
+            // Exercise has no video — show a subtle placeholder
+            ZStack {
+                Rectangle().fill(Color.gray.opacity(0.08))
+                VStack(spacing: 6) {
+                    Image(systemName: "video.slash")
+                        .font(.title)
+                        .foregroundStyle(.secondary)
+                    Text("No Video Available")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// Under the video: the exercise name, what's up next, and a small N of M. (The countdown and
+    /// the live Watch numbers are in the video overlay.)
+    @ViewBuilder
+    private var infoBlock: some View {
         // Exercise Name
         Text(currentExercise?.name ?? "Workout Complete")
             .font(.title)
@@ -220,48 +218,24 @@ struct WorkoutPlayerView: View {
             .lineLimit(2)
             .minimumScaleFactor(0.8)
 
-        // Timer
-        Text(timeRemaining > 0 ? "\(timeRemaining)" : "00")
-            .font(.system(size: compact ? 48 : 64, weight: .bold, design: .monospaced))
-            .foregroundStyle(timeRemaining <= 3 && timeRemaining > 0 ? .red : .primary)
-
-        // Progress and Next up combined
-        VStack(spacing: 4) {
-            if currentIndex < routine.count {
-                Text("Exercise \(currentIndex + 1) of \(routine.count)")
+        // Up next
+        if isPlaying && currentIndex < routine.count {
+            HStack(spacing: 4) {
+                Text("Up Next:")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-            }
-
-            if isPlaying && currentIndex < routine.count {
-                HStack(spacing: 4) {
-                    Text("Next:")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(nextUpText)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
-                }
+                Text(nextUpText)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
             }
         }
 
-        // Live workout stats (exercise time, HR zone, nutrient burn)
-        if isPlaying {
-            #if os(iOS)
-            WorkoutLiveStatsView(
-                exerciseTime: totalExerciseTime,
-                heartRate: connectivityManager.heartRate,
-                hasWatchData: connectivityManager.isWatchConnected && connectivityManager.heartRate > 0,
-                intention: intention,
-                zoneThresholds: connectivityManager.watchZoneThresholds,
-                watchZoneIndex: connectivityManager.watchZoneIndex
-            )
-            .padding(.top, 4)
-            #else
-            WorkoutLiveStatsView(exerciseTime: totalExerciseTime, heartRate: 0, hasWatchData: false, intention: intention)
-                .padding(.top, 4)
-            #endif
+        // Small "Exercise N of M"
+        if currentIndex < routine.count {
+            Text("Exercise \(currentIndex + 1) of \(routine.count)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
 
         // Apple Watch metrics while a Watch workout is live; a one-line hint otherwise
@@ -394,21 +368,9 @@ struct WorkoutPlayerView: View {
                 #else
                 let isRegular = false
                 #endif
-                // A short, narrow screen — the Duo's outer display, an iPhone SE. Everything gets
-                // a size down so the stats tile stays clear of the Pause/Skip bar instead of
-                // sliding under it.
+                // A short, narrow screen — the Duo's outer display, an iPhone SE: controls a size down.
                 let isCompactHeight = !isRegular && proxy.size.height < 720
-                // (Per platform, so macOS — where `isRegular` is always false — doesn't carry the
-                // regular-width arms as dead code.)
-                #if os(iOS)
-                let videoMaxH: CGFloat = isRegular ? 420 : (isCompactHeight ? 120 : (isLandscape ? 110 : 180))
-                let videoHeightFraction: CGFloat = isCompactHeight ? 0.25 : (isRegular ? 0.4 : 0.35)
-                #else
-                let videoMaxH: CGFloat = 220
-                let videoHeightFraction: CGFloat = isCompactHeight ? 0.25 : 0.35
-                #endif
-                let videoHeight = min(proxy.size.height * videoHeightFraction, videoMaxH)
-                let sectionSpacing: CGFloat = isCompactHeight ? 10 : 16
+                let sectionSpacing: CGFloat = isCompactHeight ? 8 : 12
                 let buttonSize: CGFloat = isCompactHeight ? 64 : 80
                 let iconSize: CGFloat = isCompactHeight ? 24 : 30
                 let barPadding: CGFloat = isCompactHeight ? 8 : 12
@@ -417,11 +379,12 @@ struct WorkoutPlayerView: View {
                     // beside it and scrolls on its own if it needs to.
                     let columnWidth = proxy.size.width * 0.58
                     HStack(alignment: .top, spacing: 20) {
-                        videoBlock(height: min(columnWidth * 9 / 16, proxy.size.height - 180))
+                        videoBlock()
                             .frame(width: columnWidth)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
                         ScrollView {
                             VStack(spacing: sectionSpacing) {
-                                infoBlock(compact: false)
+                                infoBlock
                             }
                             .frame(maxWidth: .infinity, alignment: .top)
                             .padding(.vertical)
@@ -433,11 +396,17 @@ struct WorkoutPlayerView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: sectionSpacing) {
-                            videoBlock(height: videoHeight)
-                            infoBlock(compact: isCompactHeight)
+                            // Full width, and as tall as 16:9 allows (capped so a landscape phone
+                            // still has room for the controls).
+                            videoBlock()
+                                .frame(maxHeight: proxy.size.height * (isLandscape ? 0.6 : 0.55))
+                            VStack(spacing: sectionSpacing) {
+                                infoBlock
+                            }
+                            .frame(maxWidth: .infinity, alignment: .top)
+                            .padding(.horizontal)
                         }
                         .frame(maxWidth: .infinity, alignment: .top)
-                        .padding(isCompactHeight ? 10 : 16)
                     }
                     .safeAreaInset(edge: .bottom) { controlsBar(buttonSize: buttonSize, iconSize: iconSize, verticalPadding: barPadding) }
                 }

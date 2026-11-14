@@ -42,10 +42,4 @@ struct WorkoutState: Codable {
     var activityTypeRaw: UInt? = nil
 }
 
-// MARK: - Health Metrics (Watch → iPhone only)
-
-struct WatchHealthMetrics: Codable {
-    let heartRate: Double
-    let activeCalories: Double
-    let isWorkoutActive: Bool
-}
+// WatchHealthMetrics (Watch → iPhone) now lives in Shared/WatchHealthMetrics.swift.

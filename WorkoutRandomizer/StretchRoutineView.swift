@@ -493,82 +493,77 @@ struct StretchPlayerView: View {
         return videoManager.url(for: stretch.name)
     }
 
-    /// During "Get Ready" the index has already advanced, so the video previews the stretch
-    /// that's about to start — which is exactly what you want to see while getting into position.
+    /// The live Watch numbers for the overlay — present only while a Watch workout is running.
+    private var liveSnapshot: LiveMetricsSnapshot? {
+        #if os(iOS)
+        guard isPlaying, connectivityManager.hasLiveWatchSession else { return nil }
+        return LiveMetricsSnapshot(
+            heartRate: connectivityManager.heartRate,
+            zone: ZoneResolver.resolve(heartRate: connectivityManager.heartRate,
+                                       watchZoneIndex: connectivityManager.watchZoneIndex,
+                                       liveThresholds: connectivityManager.watchZoneThresholds),
+            calories: connectivityManager.activeCalories,
+            elapsedSeconds: elapsedSeconds
+        )
+        #else
+        return nil
+        #endif
+    }
+
+    /// The demo clip (or its placeholder), filling whatever space it's given. During "Get Ready"
+    /// the index has already advanced, so this previews the stretch that's about to start —
+    /// exactly what you want to see while getting into position.
     @ViewBuilder
-    private var stretchVideo: some View {
-        if videoManager.videoMode != VideoMode.none.rawValue {
-            Group {
-                if let player = avPlayer {
-                    #if os(macOS)
-                    AVPlayerLayerView(player: player)
-                    #else
-                    VideoPlayer(player: player)
-                    #endif
-                } else if videoURL != nil {
-                    // Resolved but not yet loaded — hold the space so the layout doesn't jump.
-                    Rectangle().fill(Color.black.opacity(0.1))
-                } else {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color.gray.opacity(0.08))
-                        VStack(spacing: 6) {
-                            Image(systemName: "video.slash")
-                                .font(.title)
-                                .foregroundStyle(.secondary)
-                            Text("No Video Available")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+    private var videoContent: some View {
+        if let player = avPlayer {
+            #if os(macOS)
+            AVPlayerLayerView(player: player)
+            #else
+            VideoPlayer(player: player)
+            #endif
+        } else if videoURL != nil {
+            // Resolved but not yet loaded — hold the space so the layout doesn't jump.
+            Rectangle().fill(Color.black.opacity(0.1))
+        } else {
+            ZStack {
+                Rectangle().fill(Color.gray.opacity(0.08))
+                VStack(spacing: 6) {
+                    Image(systemName: "video.slash")
+                        .font(.title)
+                        .foregroundStyle(.secondary)
+                    Text("No Video Available")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .frame(height: Self.videoHeight)
-            .cornerRadius(10)
-            .overlay(alignment: .topLeading) { liveMetricsCorner }
-            .padding(.horizontal)
-            .padding(.top, 8)
+        }
+    }
+
+    /// The video with the countdown (and, during a live Watch workout, the heart-rate numbers)
+    /// over it. With video turned off, the same content is drawn enlarged in its place.
+    /// Full width, 16:9.
+    @ViewBuilder
+    private var videoBlock: some View {
+        let progress: Double? = isPlaying ? Double(timerProgress) : nil
+        if videoManager.videoMode == VideoMode.none.rawValue {
+            PlayerOverlay(countdown: isPlaying ? timeRemaining : holdDuration, progress: progress,
+                          live: liveSnapshot, style: .panel)
+                .aspectRatio(16 / 9, contentMode: .fit)
         } else {
-            // Video is off: while a Watch workout is live the numbers take the video's place.
-            liveMetricsPanel
+            videoContent
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .overlay {
+                    PlayerOverlay(countdown: isPlaying ? timeRemaining : holdDuration, progress: progress,
+                                  live: liveSnapshot, style: .corner)
+                }
         }
     }
 
-    // MARK: Live Watch metrics (only while a Watch workout is running)
-
-    @ViewBuilder
-    private var liveMetricsCorner: some View {
-        #if os(iOS)
-        if isPlaying && connectivityManager.hasLiveWatchSession {
-            WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: liveZone,
-                                calories: connectivityManager.activeCalories,
-                                elapsedSeconds: elapsedSeconds, style: .corner)
-                .padding(8)
-        }
-        #endif
+    /// "Up Next": the stretch after this one, or the end of the session.
+    private var upNextText: String {
+        let next = currentIndex + 1
+        return next < stretches.count ? stretches[next].name : "End of routine"
     }
-
-    @ViewBuilder
-    private var liveMetricsPanel: some View {
-        #if os(iOS)
-        if isPlaying && connectivityManager.hasLiveWatchSession {
-            WatchMetricsOverlay(heartRate: connectivityManager.heartRate, zone: liveZone,
-                                calories: connectivityManager.activeCalories,
-                                elapsedSeconds: elapsedSeconds, style: .panel)
-                .frame(height: Self.videoHeight)
-                .padding(.horizontal)
-                .padding(.top, 8)
-        }
-        #endif
-    }
-
-    #if os(iOS)
-    private var liveZone: WorkoutZoneInfo {
-        ZoneResolver.resolve(heartRate: connectivityManager.heartRate,
-                             watchZoneIndex: connectivityManager.watchZoneIndex,
-                             liveThresholds: connectivityManager.watchZoneThresholds)
-    }
-    #endif
 
     private var timerProgress: CGFloat {
         guard isPlaying else { return 1 }
@@ -589,10 +584,10 @@ struct StretchPlayerView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                stretchVideo
-                Spacer()
+                // Video with the countdown over it, full width
+                videoBlock
 
-                VStack(spacing: 20) {
+                VStack(spacing: 10) {
                     // Phase label
                     if isPlaying {
                         HStack(spacing: 8) {
@@ -620,29 +615,26 @@ struct StretchPlayerView: View {
 
                     // Stretch name
                     Text(currentStretch?.name ?? "Complete!")
-                        .font(.largeTitle)
+                        .font(.title)
                         .fontWeight(.bold)
                         .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
                         .padding(.horizontal)
                         .animation(.default, value: currentIndex)
 
-                    // Timer ring
-                    ZStack {
-                        Circle()
-                            .stroke(Color.gray.opacity(0.15), lineWidth: 8)
-                        Circle()
-                            .trim(from: 0, to: timerProgress)
-                            .stroke(
-                                isTransitioning ? Color.orange : Color.teal,
-                                style: StrokeStyle(lineWidth: 8, lineCap: .round)
-                            )
-                            .rotationEffect(.degrees(-90))
-                            .animation(.linear(duration: 1), value: timeRemaining)
-                        Text(isPlaying ? "\(timeRemaining)" : "\(holdDuration)")
-                            .font(.system(size: 56, weight: .bold, design: .monospaced))
-                            .foregroundStyle(timeRemaining <= 3 && isPlaying ? .red : .primary)
+                    // Up next
+                    if isPlaying && currentIndex < stretches.count {
+                        HStack(spacing: 4) {
+                            Text("Up Next:")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text(upNextText)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(upNextText == "End of routine" ? .green : .primary)
+                        }
                     }
-                    .frame(width: 160, height: 160)
 
                     #if os(iOS)
                     if isPlaying {
@@ -652,22 +644,23 @@ struct StretchPlayerView: View {
                     }
                     #endif
 
-                    // Progress
+                    // Small progress line
                     if !stretches.isEmpty {
                         VStack(spacing: 2) {
                             Text("Stretch \(min(currentIndex + 1, stretches.count)) of \(stretches.count)")
-                                .font(.subheadline)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                             if bothSidesMode, !isTransitioning, isPlaying,
                                let stretch = currentStretch, stretch.singleSided {
                                 Text(currentSide == 0 ? "First side" : "Second side")
-                                    .font(.caption)
+                                    .font(.caption2)
                                     .foregroundStyle(.secondary)
                                     .animation(.easeInOut, value: currentSide)
                             }
                         }
                     }
                 }
+                .padding(.top, 12)
 
                 Spacer()
 
