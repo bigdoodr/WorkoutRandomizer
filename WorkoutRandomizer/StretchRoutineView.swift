@@ -32,6 +32,23 @@ struct StretchRoutineView: View {
     @State private var bothSidesMode: Bool = true
     @State private var generatedStretches: [Exercise] = []
     @State private var showingPlayer = false
+    /// Whether the running player was presented full screen. Decided once, when the session starts,
+    /// and never re-evaluated: folding or unfolding a dual-screen iPhone mid-session changes the
+    /// size class, and switching between sheet and cover would rebuild the player and reset it.
+    @State private var playerIsFullScreen = false
+#if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+#endif
+
+    /// Regular width (the Duo's inner display, iPads) gets a full-screen player — room for the larger
+    /// layout. macOS has no full-screen cover.
+    private var prefersFullScreenPlayer: Bool {
+#if os(iOS)
+        horizontalSizeClass == .regular
+#else
+        false
+#endif
+    }
     @State private var showingSave = false
     @State private var showSaveConfirmation = false
     @State private var confirmSaveAfterDismiss = false
@@ -293,6 +310,7 @@ struct StretchRoutineView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
 
                         Button {
+                            playerIsFullScreen = prefersFullScreenPlayer
                             showingPlayer = true
                         } label: {
                             HStack {
@@ -342,19 +360,35 @@ struct StretchRoutineView: View {
             }
             .padding()
         }
-        .sheet(isPresented: $showingPlayer) {
-            StretchPlayerView(
-                stretches: generatedStretches,
-                holdDuration: holdDuration,
-                bothSidesMode: bothSidesMode,
-                onComplete: { }
-            )
+        // Compact width keeps the sheet; regular width goes full screen.
+        .sheet(isPresented: Binding(
+            get: { showingPlayer && !playerIsFullScreen },
+            set: { showingPlayer = $0 }
+        )) {
+            stretchPlayer
         }
+#if os(iOS)
+        .fullScreenCover(isPresented: Binding(
+            get: { showingPlayer && playerIsFullScreen },
+            set: { showingPlayer = $0 }
+        )) {
+            stretchPlayer
+        }
+#endif
         .onAppear {
             if selectedCategories.isEmpty, let first = stretchCategories.first {
                 selectedCategories = [first]
             }
         }
+    }
+
+    private var stretchPlayer: some View {
+        StretchPlayerView(
+            stretches: generatedStretches,
+            holdDuration: holdDuration,
+            bothSidesMode: bothSidesMode,
+            onComplete: { }
+        )
     }
 
     private var defaultSaveName: String {

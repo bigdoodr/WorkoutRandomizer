@@ -843,6 +843,23 @@ private struct RoutineRow: View {
 struct SavedRoutineDetailView: View {
     let routine: SavedWorkoutRoutine
     @State private var showingPlayer = false
+    /// Whether the running player was presented full screen. Decided once, when the session starts,
+    /// and never re-evaluated: folding or unfolding a dual-screen iPhone mid-session changes the
+    /// size class, and switching between sheet and cover would rebuild the player and reset it.
+    @State private var playerIsFullScreen = false
+#if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+#endif
+
+    /// Regular width (the Duo's inner display, iPads) gets a full-screen player — room for the larger
+    /// layout. macOS has no full-screen cover.
+    private var prefersFullScreenPlayer: Bool {
+#if os(iOS)
+        horizontalSizeClass == .regular
+#else
+        false
+#endif
+    }
     @State private var selectedIntention: WorkoutIntention = .generalFitness
 
     var body: some View {
@@ -973,6 +990,7 @@ struct SavedRoutineDetailView: View {
 
                 // Start button
                 Button {
+                    playerIsFullScreen = prefersFullScreenPlayer
                     showingPlayer = true
                 } label: {
                     HStack {
@@ -993,9 +1011,21 @@ struct SavedRoutineDetailView: View {
 #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
 #endif
-        .sheet(isPresented: $showingPlayer) {
+        // Compact width keeps the sheet; regular width goes full screen.
+        .sheet(isPresented: Binding(
+            get: { showingPlayer && !playerIsFullScreen },
+            set: { showingPlayer = $0 }
+        )) {
             SavedRoutinePlayerView(routine: routine, intention: selectedIntention)
         }
+#if os(iOS)
+        .fullScreenCover(isPresented: Binding(
+            get: { showingPlayer && playerIsFullScreen },
+            set: { showingPlayer = $0 }
+        )) {
+            SavedRoutinePlayerView(routine: routine, intention: selectedIntention)
+        }
+#endif
     }
 }
 
