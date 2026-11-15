@@ -1008,6 +1008,9 @@ private struct PlayerStep: Identifiable {
     let duration: Int
     let isRest: Bool
     let accentColor: Color
+    /// Which of the routine's exercises this step belongs to (both sides of a single-sided
+    /// exercise share one); nil for a rest. Drives the exercises-only "N of M".
+    var exerciseIndex: Int? = nil
 }
 
 // MARK: - Saved Routine Player
@@ -1033,6 +1036,7 @@ struct SavedRoutinePlayerView: View {
     @State private var peakHeartRate: Double = 0
     @State private var heartRateSamples: [Double] = []
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var connectivityManager = WorkoutConnectivityManager.shared
     @StateObject private var videoManager = VideoManager.shared
 
@@ -1071,6 +1075,15 @@ struct SavedRoutinePlayerView: View {
 
     var body: some View {
         NavigationStack {
+            GeometryReader { proxy in
+            // Regular width (the Duo's inner display, iPads) has room under the video for larger
+            // text, an Up Next card and a progress bar; phones keep the compact layout.
+            let roomy = horizontalSizeClass == .regular
+            #if os(iOS)
+            let scale = RoomyMetrics.scale(forHeight: proxy.size.height)
+            #else
+            let scale: CGFloat = 1
+            #endif
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(spacing: 12) {
@@ -1079,7 +1092,13 @@ struct SavedRoutinePlayerView: View {
                         // fills the video's place. Full width, 16:9.
                         videoBlock
 
-                        VStack(spacing: 8) {
+                        VStack(spacing: roomy ? 8 * scale : 8) {
+                            #if os(iOS)
+                            if roomy {
+                                WorkoutSegmentBar(total: exerciseProgress.total, current: exerciseProgress.number - 1, tint: routine.accentColor)
+                            }
+                            #endif
+
                             // Step name
                             if let step = currentStep {
                                 if let side = step.sideLabel {
@@ -1092,35 +1111,34 @@ struct SavedRoutinePlayerView: View {
                                         .clipShape(Capsule())
                                 }
                                 Text(step.label)
-                                    .font(.title)
-                                    .fontWeight(.bold)
+                                    .font(roomy ? .system(size: 30 * scale, weight: .bold) : .title.weight(.bold))
                                     .multilineTextAlignment(.center)
                                     .lineLimit(2)
                                     .minimumScaleFactor(0.8)
                             } else {
                                 Text("Complete!")
-                                    .font(.title)
-                                    .fontWeight(.bold)
+                                    .font(roomy ? .system(size: 30 * scale, weight: .bold) : .title.weight(.bold))
                                     .foregroundStyle(.green)
                             }
 
                             // Up next
                             if isPlaying && currentIndex < steps.count {
-                                HStack(spacing: 4) {
-                                    Text("Up Next:")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                    Text(nextUpText)
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
+                                #if os(iOS)
+                                if roomy, let next = nextStepInfo {
+                                    UpNextCard(name: next.step.label, note: next.note,
+                                               videoURL: VideoManager.shared.url(for: next.step.label), scale: scale)
+                                } else {
+                                    upNextLine(scale: roomy ? scale : 1)
                                 }
+                                #else
+                                upNextLine(scale: 1)
+                                #endif
                             }
 
                             // Small "Step N of M"
                             if !steps.isEmpty {
-                                Text("Step \(min(currentIndex + 1, steps.count)) of \(steps.count)")
-                                    .font(.caption)
+                                Text("\(routine.isFlexibilitySession ? "Stretch" : "Exercise") \(exerciseProgress.number) of \(exerciseProgress.total)")
+                                    .font(roomy ? .system(size: 14 * scale) : .caption)
                                     .foregroundStyle(.secondary)
                             }
 
@@ -1175,6 +1193,7 @@ struct SavedRoutinePlayerView: View {
                 .background(.thinMaterial)
                 .shadow(radius: 2)
                 .padding(.horizontal)
+            }
             }
             .navigationTitle("Workout")
 #if os(iOS) || os(visionOS)
@@ -1257,11 +1276,38 @@ struct SavedRoutinePlayerView: View {
                 // Core-only routines skip the alignment score, as live Core workouts do.
                 selectedFocusAreas: routine.kind == .core ? ["Core"] : [],
                 onDismiss: {
-                    showingRecap = false
+                    // Dismiss the player itself: that takes the recap it presented away in the same
+                    // transition. (Clearing `showingRecap` first dismissed the recap alone and let the
+                    // finished player show for a moment before it, too, was dismissed.)
                     dismiss()
                 }
             )
         }
+    }
+
+    /// The one-line "Up Next: …" used where there isn't room for the card.
+    private func upNextLine(scale: CGFloat) -> some View {
+        HStack(spacing: 4) {
+            Text("Up Next:")
+                .font(.system(size: 15 * scale))
+                .foregroundStyle(.secondary)
+            Text(nextUpText)
+                .font(.system(size: 15 * scale, weight: .semibold))
+                .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
+        }
+    }
+
+    /// The next real step after this one (skipping rests), with a note for its side and/or a rest
+    /// that comes first. Nil at the end of the routine.
+    private var nextStepInfo: (step: PlayerStep, note: String?)? {
+        let start = currentIndex + 1
+        guard start < steps.count else { return nil }
+        for index in start..<steps.count where !steps[index].isRest {
+            let restNote: String? = steps[start].isRest ? "after a \(steps[start].duration)s rest" : nil
+            let note = [steps[index].sideLabel, restNote].compactMap { $0 }.joined(separator: " · ")
+            return (steps[index], note.isEmpty ? nil : note)
+        }
+        return nil
     }
 
     // MARK: Video area
@@ -1327,24 +1373,32 @@ struct SavedRoutinePlayerView: View {
 
     private func buildSteps() {
         var result: [PlayerStep] = []
-        for ex in routine.exercises {
+        for (index, ex) in routine.exercises.enumerated() {
             if ex.singleSided {
-                result.append(PlayerStep(label: ex.name, sideLabel: "Left Side",  duration: ex.duration, isRest: false, accentColor: routine.accentColor))
+                result.append(PlayerStep(label: ex.name, sideLabel: "Left Side",  duration: ex.duration, isRest: false, accentColor: routine.accentColor, exerciseIndex: index))
                 if ex.restAfterEachSide && ex.restDuration > 0 {
                     result.append(PlayerStep(label: "Rest", sideLabel: nil, duration: ex.restDuration, isRest: true, accentColor: routine.accentColor))
                 }
-                result.append(PlayerStep(label: ex.name, sideLabel: "Right Side", duration: ex.duration, isRest: false, accentColor: routine.accentColor))
+                result.append(PlayerStep(label: ex.name, sideLabel: "Right Side", duration: ex.duration, isRest: false, accentColor: routine.accentColor, exerciseIndex: index))
                 if ex.restDuration > 0 {
                     result.append(PlayerStep(label: "Rest", sideLabel: nil, duration: ex.restDuration, isRest: true, accentColor: routine.accentColor))
                 }
             } else {
-                result.append(PlayerStep(label: ex.name, sideLabel: nil, duration: ex.duration, isRest: false, accentColor: routine.accentColor))
+                result.append(PlayerStep(label: ex.name, sideLabel: nil, duration: ex.duration, isRest: false, accentColor: routine.accentColor, exerciseIndex: index))
                 if ex.restDuration > 0 {
                     result.append(PlayerStep(label: "Rest", sideLabel: nil, duration: ex.restDuration, isRest: true, accentColor: routine.accentColor))
                 }
             }
         }
         steps = result
+    }
+
+    /// The exercises-only "N of M" for the current step (rests don't count; on a rest it points at
+    /// the next exercise).
+    private var exerciseProgress: (number: Int, total: Int) {
+        let numbering = ExerciseNumbering.ordinals(for: steps.map(\.exerciseIndex))
+        guard numbering.ordinals.indices.contains(currentIndex) else { return (numbering.total, numbering.total) }
+        return (numbering.ordinals[currentIndex], numbering.total)
     }
 
     /// Wires the clock's callbacks to this player's state. Done once, when the player appears.
@@ -1412,11 +1466,17 @@ struct SavedRoutinePlayerView: View {
     /// The steps as a plan: each step's name, rest flag, side label and duration, with Both Sides,
     /// holds, rests and custom timers already applied by `buildSteps()`.
     private func makePlan() -> WorkoutPlan {
-        WorkoutPlan(
+        // "N of M" counts exercises only (both sides of one exercise are one), on the Watch too.
+        let numbering = ExerciseNumbering.ordinals(for: steps.map(\.exerciseIndex))
+        return WorkoutPlan(
             id: UUID().uuidString,
             createdAt: Date().timeIntervalSince1970,
-            slots: steps.map { PlanSlot(name: $0.label, isRest: $0.isRest, duration: $0.duration, sideLabel: $0.sideLabel) },
-            activityTypeRaw: declaredActivityTypeRaw
+            slots: steps.enumerated().map { index, step in
+                PlanSlot(name: step.label, isRest: step.isRest, duration: step.duration, sideLabel: step.sideLabel,
+                         groupIndex: max(0, numbering.ordinals[index] - 1))
+            },
+            activityTypeRaw: declaredActivityTypeRaw,
+            groupCount: numbering.total
         )
     }
 

@@ -11,13 +11,13 @@
 
 import Foundation
 
-struct StretchPlanItem: Equatable {
+nonisolated struct StretchPlanItem: Equatable {
     let name: String
     let singleSided: Bool
 }
 
 /// What a plan slot means to the stretch player.
-struct StretchSlotRole: Equatable {
+nonisolated struct StretchSlotRole: Equatable {
     let stretchIndex: Int
     /// 0 = first (left) side, 1 = second (right) side.
     let side: Int

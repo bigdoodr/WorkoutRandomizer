@@ -833,3 +833,44 @@ struct LiveWatchSessionTests {
         #expect(!manager.hasLiveWatchSession)
     }
 }
+
+// MARK: - Exercises-only numbering
+
+struct ExerciseNumberingTests {
+
+    @Test func restsDoNotCount() {
+        // exercise, rest, exercise, rest, exercise
+        let (ordinals, total) = ExerciseNumbering.ordinals(for: [0, nil, 2, nil, 4])
+        #expect(total == 3)
+        // A rest points at the exercise that follows it.
+        #expect(ordinals == [1, 2, 2, 3, 3])
+    }
+
+    @Test func bothSidesOfAnExerciseAreOne() {
+        // Left, Right (same exercise 0), a rest, then exercise 1 with a rest between its sides.
+        let (ordinals, total) = ExerciseNumbering.ordinals(for: [0, 0, nil, 1, nil, 1, nil])
+        #expect(total == 2)
+        #expect(ordinals == [1, 1, 2, 2, 2, 2, 2])
+    }
+
+    @Test func aTrailingRestKeepsTheLastNumber() {
+        let (ordinals, total) = ExerciseNumbering.ordinals(for: [0, nil, 1, nil])
+        #expect(total == 2)
+        #expect(ordinals == [1, 2, 2, 2])
+    }
+
+    @Test func aWarmUpAndCoolDownAreExercises() {
+        // 22 slots with 12 exercises (the real case: the recap said 12, the screen said 22).
+        var owners: [Int?] = []
+        for i in 0..<12 { owners.append(i); if i < 11 { owners.append(nil) } }
+        while owners.count < 22 { owners.append(nil) }   // padding rests
+        let (_, total) = ExerciseNumbering.ordinals(for: owners)
+        #expect(total == 12)
+    }
+
+    @Test func aRoutineWithNoExercisesHasNoCount() {
+        let (ordinals, total) = ExerciseNumbering.ordinals(for: [nil, nil])
+        #expect(total == 0)
+        #expect(ordinals == [0, 0])
+    }
+}

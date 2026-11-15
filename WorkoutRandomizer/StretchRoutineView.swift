@@ -461,6 +461,7 @@ struct StretchPlayerView: View {
     @State private var elapsedSeconds = 0
     @State private var showingRecap = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     // Audio + Watch feedback
     @State private var audioEngine: AVAudioEngine?
@@ -485,8 +486,11 @@ struct StretchPlayerView: View {
 
     /// Prefers the stretch's explicit videoPath so Left/Right expanded variants — whose names
     /// aren't catalog keys — still resolve. Returns nil when the user has chosen "No Video".
-    private var videoURL: URL? {
-        guard let stretch = currentStretch else { return nil }
+    private var videoURL: URL? { videoURL(for: currentStretch) }
+
+    /// The clip for any stretch (the current one, or the next one for the Up Next card).
+    private func videoURL(for stretch: Exercise?) -> URL? {
+        guard let stretch else { return nil }
         if let path = stretch.videoPath {
             return videoManager.playableURL(forRelativePath: path)
         }
@@ -559,6 +563,18 @@ struct StretchPlayerView: View {
         }
     }
 
+    /// The one-line "Up Next: …" used where there isn't room for the card.
+    private func upNextLine(scale: CGFloat) -> some View {
+        HStack(spacing: 4) {
+            Text("Up Next:")
+                .font(.system(size: 15 * scale))
+                .foregroundStyle(.secondary)
+            Text(upNextText)
+                .font(.system(size: 15 * scale, weight: .semibold))
+                .foregroundStyle(upNextText == "End of routine" ? .green : .primary)
+        }
+    }
+
     /// "Up Next": the stretch after this one, or the end of the session.
     private var upNextText: String {
         let next = currentIndex + 1
@@ -583,11 +599,27 @@ struct StretchPlayerView: View {
 
     var body: some View {
         NavigationStack {
+            GeometryReader { proxy in
+            // Regular width (the Duo's inner display, iPads) has room under the video for larger
+            // text, an Up Next card and a progress bar; phones keep the compact layout.
+            let roomy = horizontalSizeClass == .regular
+            #if os(iOS)
+            let scale = RoomyMetrics.scale(forHeight: proxy.size.height)
+            #else
+            let scale: CGFloat = 1
+            #endif
             VStack(spacing: 0) {
                 // Video with the countdown over it, full width
                 videoBlock
 
-                VStack(spacing: 10) {
+                VStack(spacing: roomy ? 10 * scale : 10) {
+                    #if os(iOS)
+                    if roomy {
+                        WorkoutSegmentBar(total: stretches.count, current: min(currentIndex, max(stretches.count - 1, 0)), tint: .teal)
+                            .padding(.horizontal)
+                    }
+                    #endif
+
                     // Phase label
                     if isPlaying {
                         HStack(spacing: 8) {
@@ -615,8 +647,7 @@ struct StretchPlayerView: View {
 
                     // Stretch name
                     Text(currentStretch?.name ?? "Complete!")
-                        .font(.title)
-                        .fontWeight(.bold)
+                        .font(roomy ? .system(size: 30 * scale, weight: .bold) : .title.weight(.bold))
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                         .minimumScaleFactor(0.8)
@@ -625,15 +656,17 @@ struct StretchPlayerView: View {
 
                     // Up next
                     if isPlaying && currentIndex < stretches.count {
-                        HStack(spacing: 4) {
-                            Text("Up Next:")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Text(upNextText)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(upNextText == "End of routine" ? .green : .primary)
+                        #if os(iOS)
+                        if roomy, currentIndex + 1 < stretches.count {
+                            UpNextCard(name: stretches[currentIndex + 1].name,
+                                       videoURL: videoURL(for: stretches[currentIndex + 1]), scale: scale)
+                                .padding(.horizontal)
+                        } else {
+                            upNextLine(scale: roomy ? scale : 1)
                         }
+                        #else
+                        upNextLine(scale: 1)
+                        #endif
                     }
 
                     #if os(iOS)
@@ -648,7 +681,7 @@ struct StretchPlayerView: View {
                     if !stretches.isEmpty {
                         VStack(spacing: 2) {
                             Text("Stretch \(min(currentIndex + 1, stretches.count)) of \(stretches.count)")
-                                .font(.caption)
+                                .font(roomy ? .system(size: 14 * scale) : .caption)
                                 .foregroundStyle(.secondary)
                             if bothSidesMode, !isTransitioning, isPlaying,
                                let stretch = currentStretch, stretch.singleSided {
@@ -697,6 +730,7 @@ struct StretchPlayerView: View {
                     }
                 }
                 .padding(.vertical, 24)
+            }
             }
             .navigationTitle("Stretching")
 #if os(iOS) || os(visionOS)
@@ -777,7 +811,9 @@ struct StretchPlayerView: View {
                 bothSidesMode: bothSidesMode,
                 onDismiss: {
                     onComplete?()
-                    showingRecap = false
+                    // Dismiss the player itself: that takes the recap it presented away in the same
+                    // transition. (Clearing `showingRecap` first dismissed the recap alone and let the
+                    // finished player show for a moment before it, too, was dismissed.)
                     dismiss()
                 }
             )

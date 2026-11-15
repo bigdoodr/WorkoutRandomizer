@@ -91,8 +91,11 @@ struct WorkoutPlayerView: View {
         currentExercise?.name == "Rest"
     }
     
-    var videoURL: URL? {
-        guard let exercise = currentExercise else { return nil }
+    var videoURL: URL? { videoURL(for: currentExercise) }
+
+    /// The demo clip for any exercise (the current one, or the next one for the Up Next card).
+    func videoURL(for exercise: Exercise?) -> URL? {
+        guard let exercise else { return nil }
         // Prefer the exercise's explicit videoPath (works for left/right expanded variants
         // whose names don't appear as keys in the catalog). Fall back to name lookup only
         // when videoPath is nil (e.g. custom exercises added by the user).
@@ -155,6 +158,44 @@ struct WorkoutPlayerView: View {
         #endif
     }
 
+    /// The one-line "Up Next: …" used where there isn't room for the card.
+    private func upNextLine(scale: CGFloat) -> some View {
+        HStack(spacing: 4) {
+            Text("Up Next:")
+                .font(.system(size: 15 * scale))
+                .foregroundStyle(.secondary)
+            Text(nextUpText)
+                .font(.system(size: 15 * scale, weight: .semibold))
+                .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
+        }
+    }
+
+    /// The next real exercise after the current slot (skipping rests), with a note when a rest
+    /// comes first. Nil at the end of the routine.
+    private var nextExerciseInfo: (exercise: Exercise, note: String?)? {
+        let start = currentIndex + 1
+        guard start < routine.count else { return nil }
+        // A rest between here and the next exercise is worth a mention ("after a 10s rest").
+        let note: String? = routine[start].name == "Rest"
+            ? "after a \(timing.duration(at: start, in: routine))s rest" : nil
+        for index in start..<routine.count where routine[index].name != "Rest" {
+            return (routine[index], note)
+        }
+        return nil
+    }
+
+    /// Which exercise owns each slot (nil for a rest), for the exercises-only count.
+    private var exerciseOwners: [Int?] {
+        routine.indices.map { routine[$0].name == "Rest" ? nil : $0 }
+    }
+
+    /// The "N of M" shown under the video: exercises only. On a rest it points at the next one.
+    private var exerciseProgress: (number: Int, total: Int) {
+        let numbering = ExerciseNumbering.ordinals(for: exerciseOwners)
+        guard numbering.ordinals.indices.contains(currentIndex) else { return (numbering.total, numbering.total) }
+        return (numbering.ordinals[currentIndex], numbering.total)
+    }
+
     /// 0...1 through the current slot, for the thin progress bar.
     private var slotProgress: Double? {
         guard isPlaying, durationForCurrentPosition > 0 else { return nil }
@@ -207,34 +248,41 @@ struct WorkoutPlayerView: View {
     }
 
     /// Under the video: the exercise name, what's up next, and a small N of M. (The countdown and
-    /// the live Watch numbers are in the video overlay.)
+    /// the live Watch numbers are in the video overlay.) With `roomy` (regular-width layouts) the
+    /// text is larger — scaled to the height available — and Up Next becomes a card with a still
+    /// from the next exercise's video, plus a thin progress bar with a segment per exercise.
     @ViewBuilder
-    private var infoBlock: some View {
+    private func infoBlock(roomy: Bool, scale: CGFloat) -> some View {
+        #if os(iOS)
+        if roomy {
+            WorkoutSegmentBar(total: exerciseProgress.total, current: exerciseProgress.number - 1)
+        }
+        #endif
+
         // Exercise Name
         Text(currentExercise?.name ?? "Workout Complete")
-            .font(.title)
-            .fontWeight(.bold)
+            .font(roomy ? .system(size: 30 * scale, weight: .bold) : .title.weight(.bold))
             .multilineTextAlignment(.center)
             .lineLimit(2)
             .minimumScaleFactor(0.8)
 
         // Up next
         if isPlaying && currentIndex < routine.count {
-            HStack(spacing: 4) {
-                Text("Up Next:")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Text(nextUpText)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(nextUpText == "Rest" ? .blue : (nextUpText == "End of routine" ? .green : .primary))
+            #if os(iOS)
+            if roomy, let next = nextExerciseInfo {
+                UpNextCard(name: next.exercise.name, note: next.note, videoURL: videoURL(for: next.exercise), scale: scale)
+            } else {
+                upNextLine(scale: roomy ? scale : 1)
             }
+            #else
+            upNextLine(scale: 1)
+            #endif
         }
 
-        // Small "Exercise N of M"
+        // Small "Exercise N of M" — exercises only; rests don't count
         if currentIndex < routine.count {
-            Text("Exercise \(currentIndex + 1) of \(routine.count)")
-                .font(.caption)
+            Text("Exercise \(exerciseProgress.number) of \(exerciseProgress.total)")
+                .font(roomy ? .system(size: 14 * scale) : .caption)
                 .foregroundStyle(.secondary)
         }
 
@@ -374,6 +422,14 @@ struct WorkoutPlayerView: View {
                 let buttonSize: CGFloat = isCompactHeight ? 64 : 80
                 let iconSize: CGFloat = isCompactHeight ? 24 : 30
                 let barPadding: CGFloat = isCompactHeight ? 8 : 12
+                // Regular width (the Duo's inner display, iPads) has room under the video for larger
+                // text, an Up Next card and a progress bar. Phones and the Duo's outer display
+                // keep the compact layout.
+                #if os(iOS)
+                let roomyScale = RoomyMetrics.scale(forHeight: proxy.size.height)
+                #else
+                let roomyScale: CGFloat = 1
+                #endif
                 if isRegular && isLandscape {
                     // Two columns: the video takes the wide side, the rest of the player sits
                     // beside it and scrolls on its own if it needs to.
@@ -384,7 +440,7 @@ struct WorkoutPlayerView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                         ScrollView {
                             VStack(spacing: sectionSpacing) {
-                                infoBlock
+                                infoBlock(roomy: true, scale: roomyScale)
                             }
                             .frame(maxWidth: .infinity, alignment: .top)
                             .padding(.vertical)
@@ -400,8 +456,8 @@ struct WorkoutPlayerView: View {
                             // still has room for the controls).
                             videoBlock()
                                 .frame(maxHeight: proxy.size.height * (isLandscape ? 0.6 : 0.55))
-                            VStack(spacing: sectionSpacing) {
-                                infoBlock
+                            VStack(spacing: isRegular ? sectionSpacing * roomyScale : sectionSpacing) {
+                                infoBlock(roomy: isRegular, scale: roomyScale)
                             }
                             .frame(maxWidth: .infinity, alignment: .top)
                             .padding(.horizontal)
@@ -561,7 +617,9 @@ struct WorkoutPlayerView: View {
                 intention: intention,
                 selectedFocusAreas: selectedFocusAreas,
                 onDismiss: {
-                    showingRecap = false
+                    // Dismiss the player itself: that takes the recap it presented away in the same
+                    // transition. (Clearing `showingRecap` first dismissed the recap alone and let the
+                    // finished player show for a moment before it, too, was dismissed.)
                     dismiss()
                 }
             )
@@ -882,17 +940,22 @@ struct WorkoutPlayerView: View {
     /// exercise from its own clock instead of waiting on a message per transition.
     private func beginPlanSync() {
         let now = Date().timeIntervalSince1970
+        // "N of M" counts exercises only, so the Watch (which shows the plan's group numbers)
+        // matches this screen.
+        let numbering = ExerciseNumbering.ordinals(for: exerciseOwners)
         let slots = routine.indices.map { index in
             PlanSlot(name: routine[index].name,
                      isRest: routine[index].name == "Rest",
-                     duration: timing.duration(at: index, in: routine))
+                     duration: timing.duration(at: index, in: routine),
+                     groupIndex: max(0, numbering.ordinals[index] - 1))
         }
         #if canImport(HealthKit)
         let activityTypeRaw: UInt? = resolvedActivityType.rawValue
         #else
         let activityTypeRaw: UInt? = nil
         #endif
-        let newPlan = WorkoutPlan(id: UUID().uuidString, createdAt: now, slots: slots, activityTypeRaw: activityTypeRaw)
+        let newPlan = WorkoutPlan(id: UUID().uuidString, createdAt: now, slots: slots,
+                                  activityTypeRaw: activityTypeRaw, groupCount: numbering.total)
         let start = PlanClock.anchor(planID: newPlan.id, slotIndex: currentIndex, secondsIntoSlot: 0,
                                      isRunning: !isPaused, now: now, source: .phone)
         plan = newPlan
